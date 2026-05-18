@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { fetchJiraTicket, runTestRequest, sendSlackNotificationRequest } from "../lib/api";
+import { fetchJiraTicket, runTestRequest, sendSlackNotificationRequest, sendZohoCliqNotificationRequest } from "../lib/api";
 import { STATUS } from "../lib/constants";
 import { genId, parseJiraUrl, playChime } from "../lib/utils";
 
@@ -33,6 +33,15 @@ export function useTests({
     });
   }, [backendUrl, settings.slackOnFail, settings.slackOnPass]);
 
+  const notifyZohoCliq = useCallback(async (description, status, verdict) => {
+    if (!settings.zohoCliqOnFail && !settings.zohoCliqOnPass) return;
+    await sendZohoCliqNotificationRequest(backendUrl, {
+      description,
+      status,
+      verdict,
+    });
+  }, [backendUrl, settings.zohoCliqOnFail, settings.zohoCliqOnPass]);
+
   const runSingleTest = useCallback(async (testId, description, jiraKey) => {
     // Flip status immediately so cards feel responsive while the backend is
     // still running or while reviewers are exercising the mock contract.
@@ -62,6 +71,9 @@ export function useTests({
       if ((status === STATUS.fail && settings.slackOnFail) || (status === STATUS.pass && settings.slackOnPass)) {
         notifySlack(description, status, data.verdict).catch(() => {});
       }
+      if ((status === STATUS.fail && settings.zohoCliqOnFail) || (status === STATUS.pass && settings.zohoCliqOnPass)) {
+        notifyZohoCliq(description, status, data.verdict).catch(() => {});
+      }
       showToast(`${status === "pass" ? "✓ Pass" : status === "fail" ? "✗ Fail" : "⚠ Manual"} — ${description.slice(0, 50)}`, status);
       return status;
     } catch (error) {
@@ -86,7 +98,7 @@ export function useTests({
       showToast(`Error: ${error.message}`, "fail");
       return STATUS.fail;
     }
-  }, [addHistoryEntry, backendUrl, currentUser, notifySlack, settings.slackOnFail, settings.slackOnPass, settings.soundOnComplete, showToast]);
+  }, [addHistoryEntry, backendUrl, currentUser, notifySlack, notifyZohoCliq, settings.slackOnFail, settings.slackOnPass, settings.zohoCliqOnFail, settings.zohoCliqOnPass, settings.soundOnComplete, showToast]);
 
   const initiateTest = useCallback(async (raw) => {
     if (!raw || running) return;

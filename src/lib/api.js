@@ -17,6 +17,16 @@ export async function fetchHealth(backendUrl) {
   }
 }
 
+export async function fetchIntegrationsHealth(backendUrl) {
+  try {
+    const response = await fetch(`${backendUrl}/health/integrations`);
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function loginRequest(backendUrl, username, password) {
   const response = await fetch(`${backendUrl}/login`, {
     method: "POST",
@@ -128,5 +138,29 @@ export async function testSlackWebhookRequest(backendUrl, payload) {
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || "Failed to send test Slack notification.");
+  }
+}
+
+export async function sendZohoCliqNotificationRequest(backendUrl, payload) {
+  const response = await fetch(`${backendUrl}/notifications/zoho-cliq`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to send Zoho Cliq notification.");
+  }
+}
+
+export async function testZohoCliqWebhookRequest(backendUrl, payload) {
+  const response = await fetch(`${backendUrl}/notifications/zoho-cliq/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to send test Zoho Cliq notification.");
   }
 }

@@ -175,3 +175,26 @@ export async function sendSlackWebhook(config, payload) {
 
   return { ok: true, mode: "live", delivered: true };
 }
+
+export async function sendZohoCliqWebhook(config, payload) {
+  const { description = "", status = "", verdict = "", message = "" } = payload;
+  const text = message || [
+    "HailTrace QA",
+    description ? `Test: ${description}` : null,
+    status ? `Status: ${status}` : null,
+    verdict ? `Verdict: ${verdict}` : null,
+  ].filter(Boolean).join("\n");
+
+  const response = await fetch(config.zohoCliqWebhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Zoho Cliq webhook error ${response.status}`);
+  }
+
+  return { ok: true, mode: "live", delivered: true };
+}

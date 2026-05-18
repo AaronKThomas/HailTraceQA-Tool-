@@ -29,17 +29,54 @@ export const SECTION_HEADERS = [
 export const ALL_TABS = ["tests", "history", "settings", "templates", "suites", "dashboard"];
 
 export const DASHBOARD_ENDPOINTS = [
-  { label: "Health", method: "GET", path: "/health" },
-  { label: "Accounts", method: "GET", path: "/accounts" },
-  { label: "Run Test", method: "POST", path: "/run-test", okStatuses: [200, 400] },
+  {
+    label: "Backend server",
+    description: "Powers the QA tool itself",
+    method: "GET",
+    path: "/health",
+  },
+  {
+    label: "User accounts",
+    description: "Sign-in and registered users",
+    method: "GET",
+    path: "/accounts",
+  },
+  {
+    label: "Test runner",
+    description: "Receives Run Test requests",
+    method: "POST",
+    path: "/run-test",
+    okStatuses: [200, 400],
+  },
 ];
 
-export const INTEGRATION_LABELS = {
-  openai: "OpenAI",
-  hailtrace: "HailTrace API",
-  jira: "Jira",
-  slack: "Slack",
-};
+export const INTEGRATIONS = [
+  {
+    key: "openai",
+    label: "OpenAI",
+    blurb: "Reads your plain-English request and writes the test summary.",
+  },
+  {
+    key: "hailtrace",
+    label: "HailTrace API",
+    blurb: "Runs the actual automated tests and returns pass/fail.",
+  },
+  {
+    key: "jira",
+    label: "Jira",
+    blurb: "Loads ticket details when you paste a Jira link or key.",
+  },
+  {
+    key: "slack",
+    label: "Slack",
+    blurb: "Sends pass/fail notifications when enabled in Settings.",
+  },
+  {
+    key: "zohoCliq",
+    label: "Zoho Cliq",
+    blurb: "Sends pass/fail notifications when enabled in Settings.",
+  },
+];
 
 export const defaultSettings = {
   backendUrl: CONFIG_DEFAULTS.backendUrl,
@@ -47,4 +84,8 @@ export const defaultSettings = {
   exportFormat: "txt",
   displayName: "",
   theme: "dark",
+  slackOnFail: false,
+  slackOnPass: false,
+  zohoCliqOnFail: false,
+  zohoCliqOnPass: false,
 };

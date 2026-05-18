@@ -3,7 +3,7 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchJiraIssue, runHailTraceTest, sendSlackWebhook } from "./server/integrations.mjs";
+import { fetchJiraIssue, runHailTraceTest, sendSlackWebhook, sendZohoCliqWebhook } from "./server/integrations.mjs";
 import { runOpenAiGuidedHailTraceTest, runOpenAiQaPlan } from "./server/openai.mjs";
 import {
   formatJiraTicketDescription,
@@ -28,6 +28,7 @@ function buildConfig() {
     hailtraceQaPath: process.env.HAILTRACE_QA_PATH || "/qa/run-test",
     hailtraceAuthStyle: (process.env.HAILTRACE_AUTH_STYLE || "bearer").toLowerCase(),
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || "",
+    zohoCliqWebhookUrl: process.env.ZOHO_CLIQ_WEBHOOK_URL || "",
     jiraBaseUrl: process.env.JIRA_BASE_URL || "",
     jiraEmail: process.env.JIRA_EMAIL || "",
     jiraApiToken: process.env.JIRA_API_TOKEN || "",
@@ -84,20 +85,26 @@ function hasRealSlackConfig() {
   return Boolean(CONFIG.slackWebhookUrl);
 }
 
+function hasRealZohoCliqConfig() {
+  return Boolean(CONFIG.zohoCliqWebhookUrl);
+}
+
 function hasOpenAiConfig() {
   return Boolean(CONFIG.openaiApiKey);
 }
 
 function getRuntimeMode() {
-  const live = [
+  const probes = [
     hasRealHailTraceConfig(),
     hasRealJiraConfig(),
     hasRealSlackConfig(),
     hasOpenAiConfig(),
-  ].filter(Boolean).length;
+    hasRealZohoCliqConfig(),
+  ];
+  const live = probes.filter(Boolean).length;
 
   if (live === 0) return "mock";
-  if (live >= 4) return "live";
+  if (live >= probes.length) return "live";
   return "hybrid";
 }
 
@@ -122,6 +129,12 @@ function validateConfig() {
       name: "Slack",
       values: [
         ["SLACK_WEBHOOK_URL", CONFIG.slackWebhookUrl],
+      ],
+    },
+    {
+      name: "Zoho Cliq",
+      values: [
+        ["ZOHO_CLIQ_WEBHOOK_URL", CONFIG.zohoCliqWebhookUrl],
       ],
     },
     {
@@ -282,6 +295,7 @@ app.get("/health", (_req, res) => {
       jira: hasRealJiraConfig() ? "live" : "demo",
       slack: hasRealSlackConfig() ? "live" : "demo",
       openai: hasOpenAiConfig() ? "live" : "demo",
+      zohoCliq: hasRealZohoCliqConfig() ? "live" : "demo",
     },
     details: {
       openaiModel: hasOpenAiConfig() ? CONFIG.openaiModel : null,
@@ -289,7 +303,141 @@ app.get("/health", (_req, res) => {
       hailtraceQaPath: CONFIG.hailtraceQaPath,
       jiraHost: safeHostname(CONFIG.jiraBaseUrl),
       slackConfigured: hasRealSlackConfig(),
+      zohoCliqConfigured: hasRealZohoCliqConfig(),
     },
+  });
+});
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function probeOpenAi() {
+  if (!hasOpenAiConfig()) {
+    return { state: "demo", message: "Not configured — set OPENAI_API_KEY in .env" };
+  }
+  try {
+    const response = await fetchWithTimeout("https://api.openai.com/v1/models?limit=1", {
+      headers: { Authorization: `Bearer ${CONFIG.openaiApiKey}` },
+    });
+    if (response.ok) {
+      return { state: "connected", message: `Ready (${CONFIG.openaiModel})` };
+    }
+    if (response.status === 401) {
+      return { state: "error", message: "Invalid API key" };
+    }
+    if (response.status === 429) {
+      return { state: "error", message: "Rate limited or quota exhausted" };
+    }
+    return { state: "error", message: `OpenAI returned HTTP ${response.status}` };
+  } catch (error) {
+    if (error.name === "AbortError") {
+      return { state: "error", message: "Connection timed out" };
+    }
+    return { state: "error", message: "Cannot reach OpenAI" };
+  }
+}
+
+async function probeHailTrace() {
+  if (!hasRealHailTraceConfig()) {
+    return { state: "demo", message: "Not configured — set HAILTRACE_API_KEY in .env" };
+  }
+  try {
+    const url = new URL(CONFIG.hailtraceApiBaseUrl);
+    await fetchWithTimeout(url.origin, { method: "GET" });
+    return {
+      state: "connected",
+      message: `Reachable at ${url.hostname}${CONFIG.hailtraceQaPath || ""}`,
+    };
+  } catch (error) {
+    if (error.name === "AbortError") {
+      return { state: "error", message: "Connection timed out" };
+    }
+    return { state: "error", message: "Cannot reach HailTrace API" };
+  }
+}
+
+async function probeJira() {
+  if (!hasRealJiraConfig()) {
+    return { state: "demo", message: "Not configured — set JIRA_BASE_URL/EMAIL/API_TOKEN in .env" };
+  }
+  try {
+    const auth = Buffer.from(`${CONFIG.jiraEmail}:${CONFIG.jiraApiToken}`).toString("base64");
+    const baseUrl = String(CONFIG.jiraBaseUrl).replace(/\/$/, "");
+    const response = await fetchWithTimeout(`${baseUrl}/rest/api/3/myself`, {
+      headers: { Authorization: `Basic ${auth}`, Accept: "application/json" },
+    });
+    if (response.ok) {
+      const me = await response.json().catch(() => ({}));
+      const who = me.emailAddress || me.displayName || new URL(baseUrl).hostname;
+      return { state: "connected", message: `Signed in as ${who}` };
+    }
+    if (response.status === 401) {
+      return { state: "error", message: "Invalid email or API token" };
+    }
+    if (response.status === 403) {
+      return { state: "error", message: "Account does not have access" };
+    }
+    return { state: "error", message: `Jira returned HTTP ${response.status}` };
+  } catch (error) {
+    if (error.name === "AbortError") {
+      return { state: "error", message: "Connection timed out" };
+    }
+    return { state: "error", message: "Cannot reach Jira" };
+  }
+}
+
+function probeSlack() {
+  if (!hasRealSlackConfig()) {
+    return { state: "demo", message: "Not configured — set SLACK_WEBHOOK_URL in .env" };
+  }
+  try {
+    const url = new URL(CONFIG.slackWebhookUrl);
+    if (!url.hostname.endsWith("slack.com")) {
+      return { state: "warning", message: "Webhook URL does not look like Slack" };
+    }
+    return { state: "configured", message: "Webhook saved (use Settings to send a test message)" };
+  } catch {
+    return { state: "error", message: "Invalid webhook URL" };
+  }
+}
+
+function probeZohoCliq() {
+  if (!hasRealZohoCliqConfig()) {
+    return { state: "demo", message: "Not configured — set ZOHO_CLIQ_WEBHOOK_URL in .env" };
+  }
+  try {
+    const url = new URL(CONFIG.zohoCliqWebhookUrl);
+    if (!url.hostname.includes("zoho")) {
+      return { state: "warning", message: "Webhook URL does not look like Zoho Cliq" };
+    }
+    return { state: "configured", message: "Webhook saved (use Settings to send a test message)" };
+  } catch {
+    return { state: "error", message: "Invalid webhook URL" };
+  }
+}
+
+app.get("/health/integrations", async (_req, res) => {
+  const [openai, hailtrace, jira] = await Promise.all([
+    probeOpenAi(),
+    probeHailTrace(),
+    probeJira(),
+  ]);
+  res.json({
+    integrations: {
+      openai,
+      hailtrace,
+      jira,
+      slack: probeSlack(),
+      zohoCliq: probeZohoCliq(),
+    },
+    checkedAt: new Date().toISOString(),
   });
 });
 
@@ -482,6 +630,48 @@ app.post("/notifications/slack/test", async (req, res) => {
   });
 });
 
+app.post("/notifications/zoho-cliq", async (req, res) => {
+  const { description, status, verdict } = req.body || {};
+
+  if (hasRealZohoCliqConfig()) {
+    try {
+      const result = await sendZohoCliqWebhook(CONFIG, { description, status, verdict });
+      return res.json(result);
+    } catch (error) {
+      return res.status(502).json({ error: error.message });
+    }
+  }
+
+  return res.json({
+    ok: true,
+    mode: "demo",
+    delivered: true,
+    description: description || "",
+    status: status || "",
+    verdict: verdict || "",
+  });
+});
+
+app.post("/notifications/zoho-cliq/test", async (req, res) => {
+  if (hasRealZohoCliqConfig()) {
+    try {
+      const result = await sendZohoCliqWebhook(CONFIG, {
+        message: "HailTrace QA test notification — your Zoho Cliq webhook is connected.",
+      });
+      return res.json({ ...result, message: "Test notification sent to Zoho Cliq." });
+    } catch (error) {
+      return res.status(502).json({ error: error.message });
+    }
+  }
+
+  return res.json({
+    ok: true,
+    mode: "demo",
+    delivered: true,
+    message: "Demo mode: Zoho Cliq test accepted. Add ZOHO_CLIQ_WEBHOOK_URL to .env to send for real.",
+  });
+});
+
 app.listen(PORT, () => {
   validateConfig();
   console.log(`HailTrace QA backend listening on http://localhost:${PORT}`);
@@ -489,5 +679,6 @@ app.listen(PORT, () => {
   console.log(`  HailTrace QA: ${hasRealHailTraceConfig() ? "live" : "demo"}`);
   console.log(`  Jira:         ${hasRealJiraConfig() ? "live" : "demo"}`);
   console.log(`  Slack:        ${hasRealSlackConfig() ? "live" : "demo"}`);
+  console.log(`  Zoho Cliq:    ${hasRealZohoCliqConfig() ? "live" : "demo"}`);
   console.log(`  OpenAI:       ${hasOpenAiConfig() ? "live" : "demo"}`);
 });

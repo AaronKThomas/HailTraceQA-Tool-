@@ -9,6 +9,7 @@ export default function SettingsTab({
   onRemoveUser,
   onLogout,
   onTestSlack,
+  onTestZohoCliq,
 }) {
   const [form, setForm] = useState(settings);
   const [newUser, setNewUser] = useState({ username: "", displayName: "", password: "", confirm: "" });
@@ -84,6 +85,28 @@ export default function SettingsTab({
           <div className="settings-row-icon" style={{ background: "rgba(48,209,88,0.15)" }}>🟢</div>
           <div className="settings-row-body"><div className="settings-row-label">Notify on Pass</div></div>
           <label className="settings-toggle"><input type="checkbox" checked={form.slackOnPass} onChange={(event) => updateField("slackOnPass", event.target.checked)} /><div className="toggle-track" /><div className="toggle-thumb" /></label>
+        </div>
+      </div>
+
+      <div className="settings-section stagger" style={{ animationDelay: "75ms" }}>
+        <div className="settings-section-title">Zoho Cliq Notifications</div>
+        <div className="settings-row">
+          <div className="settings-row-icon" style={{ background: "rgba(229,57,53,0.18)" }}>💼</div>
+          <div className="settings-row-body">
+            <div className="settings-row-label">Backend-managed delivery</div>
+            <div className="settings-row-desc">Zoho Cliq routing should be configured on the backend. This UI only controls whether notifications are requested.</div>
+            <button className="slack-test-btn" onClick={onTestZohoCliq}>Test Delivery</button>
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-icon" style={{ background: "rgba(255,69,58,0.15)" }}>🔴</div>
+          <div className="settings-row-body"><div className="settings-row-label">Notify on Fail</div></div>
+          <label className="settings-toggle"><input type="checkbox" checked={form.zohoCliqOnFail} onChange={(event) => updateField("zohoCliqOnFail", event.target.checked)} /><div className="toggle-track" /><div className="toggle-thumb" /></label>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-icon" style={{ background: "rgba(48,209,88,0.15)" }}>🟢</div>
+          <div className="settings-row-body"><div className="settings-row-label">Notify on Pass</div></div>
+          <label className="settings-toggle"><input type="checkbox" checked={form.zohoCliqOnPass} onChange={(event) => updateField("zohoCliqOnPass", event.target.checked)} /><div className="toggle-track" /><div className="toggle-thumb" /></label>
         </div>
       </div>
 
