@@ -2,6 +2,19 @@ import { useMemo, useState } from "react";
 import { STATUS, STATUS_CONFIG } from "../../lib/constants";
 import { parseJiraUrl, parseOutput } from "../../lib/utils";
 
+function RecommendationsList({ items }) {
+  return (
+    <div className="recommendation-list">
+      {items.map((item, index) => (
+        <div key={`${item.title}-${index}`} className="recommendation-item">
+          <div className="recommendation-title">{index + 1}. {item.title}</div>
+          <div className="recommendation-description">{item.description}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TestDetail({ test }) {
   const sections = parseOutput(test.output);
 
@@ -13,7 +26,11 @@ function TestDetail({ test }) {
             {sections.filter((section) => section.header !== "VERDICT").map((section) => (
               <div key={section.header}>
                 <div className="output-section-label">{section.header}</div>
-                <div className="output-section-content">{section.content}</div>
+                {section.header === "RECOMMENDATIONS" && test.recommendations?.length ? (
+                  <RecommendationsList items={test.recommendations} />
+                ) : (
+                  <div className="output-section-content">{section.content}</div>
+                )}
               </div>
             ))}
           </div>
@@ -45,7 +62,7 @@ function TestDetail({ test }) {
 
       {test.playwrightLog ? (
         <div style={{ marginTop: 20, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-          <div className="output-section-label">Browser Output</div>
+          <div className="output-section-label">Execution Log</div>
           <pre style={{ fontSize: 12, lineHeight: 1.6, color: "var(--muted)", background: "var(--bg)", borderRadius: 8, padding: "12px 14px", overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "var(--mono)", border: "1px solid var(--border)" }}>{test.playwrightLog}</pre>
         </div>
       ) : null}
@@ -86,7 +103,7 @@ export default function TestsTab({
           id="test-input"
           value={draftInput}
           disabled={running}
-          placeholder={"Describe a HailTrace feature to test, or paste a Jira URL\n\nExamples:\n  • User should be able to submit a hail damage report\n  • https://hailtrace.atlassian.net/browse/HT-108"}
+          placeholder={"Describe a feature to test, or paste a Jira URL / key (one per line)\n\nExamples:\n  • User should be able to submit a hail damage report\n  • HT-108\n  • https://yourcompany.atlassian.net/browse/HT-108"}
           onChange={(event) => setDraftInput(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {

@@ -59,7 +59,7 @@ export function useSuites({
     if (!test) return;
     setActiveTab("tests");
     setRunning(true);
-    const newTest = { id: genId(), description: test.description, source: "manual", jiraKey: null, jiraSummary: "", status: STATUS.idle, output: "", playwrightLog: "", apiResults: [] };
+    const newTest = { id: genId(), description: test.description, source: "manual", jiraKey: null, jiraSummary: "", status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] };
     setTests((current) => [...current, newTest]);
     await runSingleTest(newTest.id, test.description, null);
     setRunning(false);
@@ -84,7 +84,7 @@ export function useSuites({
     // Run suite tests serially to match the current backend contract and keep
     // the UI timeline deterministic during reviews.
     for (const test of suite.tests) {
-      const newTest = { id: genId(), description: test.description, source: "manual", jiraKey: null, jiraSummary: "", status: STATUS.idle, output: "", playwrightLog: "", apiResults: [] };
+      const newTest = { id: genId(), description: test.description, source: "manual", jiraKey: null, jiraSummary: "", status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] };
       setTests((current) => [...current, newTest]);
       // eslint-disable-next-line no-await-in-loop
       const result = await runSingleTest(newTest.id, test.description, null);

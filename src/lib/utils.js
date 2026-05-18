@@ -5,12 +5,29 @@ export function genId() {
 }
 
 export function parseJiraUrl(str) {
+  const input = String(str || "").trim();
+  if (!input) return null;
+
+  const bare = input.match(/^([A-Za-z][A-Za-z0-9]+-\d+)$/);
+  if (bare) return bare[1].toUpperCase();
+
   try {
-    const match = new URL(str).pathname.match(/\/browse\/([A-Z]+-\d+)/);
-    if (match) return match[1];
-  } catch {}
-  const bare = str.match(/^([A-Z]+-\d+)$/);
-  return bare ? bare[1] : null;
+    const url = new URL(input);
+    const browse = url.pathname.match(/\/browse\/([A-Za-z][A-Za-z0-9]+-\d+)/i);
+    if (browse) return browse[1].toUpperCase();
+
+    const selected = url.searchParams.get("selectedIssue");
+    if (selected && /^[A-Za-z][A-Za-z0-9]+-\d+$/i.test(selected)) {
+      return selected.toUpperCase();
+    }
+
+    const issuePath = url.pathname.match(/\/issues\/([A-Za-z][A-Za-z0-9]+-\d+)/i);
+    if (issuePath) return issuePath[1].toUpperCase();
+  } catch {
+    // not a URL
+  }
+
+  return null;
 }
 
 export function parseOutput(text) {

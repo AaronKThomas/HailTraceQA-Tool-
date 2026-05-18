@@ -4,6 +4,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchJiraIssue, runHailTraceTest, sendSlackWebhook } from "./server/integrations.mjs";
+import { runOpenAiGuidedHailTraceTest, runOpenAiQaPlan } from "./server/openai.mjs";
+import {
+  formatJiraTicketDescription,
+  parseJiraKey,
+  shouldLoadJiraTicket,
+} from "./server/jiraKey.mjs";
 import { loadEnv } from "./server/loadEnv.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +31,8 @@ function buildConfig() {
     jiraBaseUrl: process.env.JIRA_BASE_URL || "",
     jiraEmail: process.env.JIRA_EMAIL || "",
     jiraApiToken: process.env.JIRA_API_TOKEN || "",
+    openaiApiKey: process.env.OPENAI_API_KEY || "",
+    openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
   };
 }
 
@@ -76,15 +84,20 @@ function hasRealSlackConfig() {
   return Boolean(CONFIG.slackWebhookUrl);
 }
 
+function hasOpenAiConfig() {
+  return Boolean(CONFIG.openaiApiKey);
+}
+
 function getRuntimeMode() {
   const live = [
     hasRealHailTraceConfig(),
     hasRealJiraConfig(),
     hasRealSlackConfig(),
+    hasOpenAiConfig(),
   ].filter(Boolean).length;
 
   if (live === 0) return "mock";
-  if (live === 3) return "live";
+  if (live >= 4) return "live";
   return "hybrid";
 }
 
@@ -111,6 +124,12 @@ function validateConfig() {
         ["SLACK_WEBHOOK_URL", CONFIG.slackWebhookUrl],
       ],
     },
+    {
+      name: "OpenAI",
+      values: [
+        ["OPENAI_API_KEY", CONFIG.openaiApiKey],
+      ],
+    },
   ];
 
   for (const group of groups) {
@@ -122,6 +141,25 @@ function validateConfig() {
       console.warn(`[config] Partial ${group.name} configuration. Missing: ${missing.join(", ")}`);
     }
   }
+}
+
+async function resolveTestInput(description, jiraKey) {
+  let text = String(description).trim();
+  let ticketKey = jiraKey ? String(jiraKey).toUpperCase() : parseJiraKey(text);
+
+  if (ticketKey && hasRealJiraConfig() && shouldLoadJiraTicket(text, ticketKey)) {
+    try {
+      const issue = await fetchJiraIssue(CONFIG, ticketKey);
+      ticketKey = (issue.key || ticketKey).toUpperCase();
+      text = formatJiraTicketDescription(issue);
+    } catch (error) {
+      console.warn(`[jira] Could not load ${ticketKey}: ${error.message}`);
+    }
+  } else if (!ticketKey) {
+    ticketKey = parseJiraKey(text);
+  }
+
+  return { text, ticketKey: ticketKey || null };
 }
 
 function buildMockAnalysis(description, jiraKey) {
@@ -234,6 +272,7 @@ app.get("/health", (_req, res) => {
       hailtrace: hasRealHailTraceConfig() ? "live" : "demo",
       jira: hasRealJiraConfig() ? "live" : "demo",
       slack: hasRealSlackConfig() ? "live" : "demo",
+      openai: hasOpenAiConfig() ? "live" : "demo",
     },
   });
 });
@@ -305,8 +344,36 @@ app.post("/run-test", async (req, res) => {
     return res.status(400).json({ error: "Description is required." });
   }
 
-  const text = String(description);
-  const ticketKey = jiraKey ? String(jiraKey) : null;
+  const { text, ticketKey } = await resolveTestInput(description, jiraKey);
+
+  if (hasOpenAiConfig()) {
+    try {
+      const result = hasRealHailTraceConfig()
+        ? await runOpenAiGuidedHailTraceTest(CONFIG, text, ticketKey)
+        : await runOpenAiQaPlan(CONFIG, text, ticketKey);
+      return res.json(result);
+    } catch (error) {
+      return res.status(502).json({
+        error: error.message,
+        verdict: "FAIL",
+        analysis: [
+          "WHAT IS BEING TESTED",
+          text,
+          "",
+          "API RESULTS",
+          `ChatGPT or HailTrace pipeline failed: ${error.message}`,
+          "",
+          "RECOMMENDATIONS",
+          "Fix OPENAI_API_KEY and HailTrace API credentials, then re-run the test.",
+          "",
+          "VERDICT: FAIL",
+        ].join("\n"),
+        recommendations: [],
+        apiResults: error.apiResults || [],
+        playwrightLog: error.message,
+      });
+    }
+  }
 
   if (hasRealHailTraceConfig()) {
     try {
@@ -406,4 +473,5 @@ app.listen(PORT, () => {
   console.log(`  HailTrace QA: ${hasRealHailTraceConfig() ? "live" : "demo"}`);
   console.log(`  Jira:         ${hasRealJiraConfig() ? "live" : "demo"}`);
   console.log(`  Slack:        ${hasRealSlackConfig() ? "live" : "demo"}`);
+  console.log(`  OpenAI:       ${hasOpenAiConfig() ? "live" : "demo"}`);
 });

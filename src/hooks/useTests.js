@@ -44,6 +44,7 @@ export function useTests({
         ...test,
         status,
         output: data.analysis || "",
+        recommendations: data.recommendations || [],
         playwrightLog: data.playwrightLog || "",
         apiResults: data.apiResults || [],
       } : test));
@@ -68,6 +69,7 @@ export function useTests({
         ...test,
         status: STATUS.fail,
         output: `Error: ${error.message}`,
+        recommendations: [],
         playwrightLog: "",
         apiResults: [],
       } : test));
@@ -105,13 +107,13 @@ export function useTests({
             ticket.description ? `\n\nDescription: ${ticket.description}` : "",
             ticket.acceptanceCriteria ? `\n\nAcceptance Criteria: ${ticket.acceptanceCriteria}` : "",
           ].join("").trim();
-          newTests.push({ id: genId(), description, source: "jira", jiraKey: ticket.key, jiraSummary: ticket.summary, status: STATUS.idle, output: "", playwrightLog: "", apiResults: [] });
+          newTests.push({ id: genId(), description, source: "jira", jiraKey: ticket.key, jiraSummary: ticket.summary, status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] });
         } catch (error) {
-          newTests.push({ id: genId(), description: `Failed to load ${jiraKey}: ${error.message}`, source: "jira", jiraKey, jiraSummary: "", status: STATUS.fail, output: error.message, playwrightLog: "", apiResults: [] });
+          newTests.push({ id: genId(), description: `Failed to load ${jiraKey}: ${error.message}`, source: "jira", jiraKey, jiraSummary: "", status: STATUS.fail, output: error.message, recommendations: [], playwrightLog: "", apiResults: [] });
         }
         setFetchingJira(false);
       } else {
-        newTests.push({ id: genId(), description: line, source: "manual", jiraKey: null, jiraSummary: "", status: STATUS.idle, output: "", playwrightLog: "", apiResults: [] });
+        newTests.push({ id: genId(), description: line, source: "manual", jiraKey: null, jiraSummary: "", status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] });
       }
     }
 
@@ -127,7 +129,7 @@ export function useTests({
   const rerunTest = useCallback(async (id) => {
     const existing = tests.find((test) => test.id === id);
     if (!existing || running) return;
-    const newTest = { id: genId(), description: existing.description, source: existing.source, jiraKey: existing.jiraKey || null, jiraSummary: existing.jiraSummary || "", status: STATUS.idle, output: "", playwrightLog: "", apiResults: [] };
+    const newTest = { id: genId(), description: existing.description, source: existing.source, jiraKey: existing.jiraKey || null, jiraSummary: existing.jiraSummary || "", status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] };
     setTests((current) => [...current, newTest]);
     await runSingleTest(newTest.id, newTest.description, newTest.jiraKey);
   }, [runSingleTest, running, tests]);
@@ -137,7 +139,7 @@ export function useTests({
       showToast("A test is already running", "fail");
       return false;
     }
-    const newTest = { id: genId(), description: entry.description, source: entry.jiraKey ? "jira" : "manual", jiraKey: entry.jiraKey || null, jiraSummary: "", status: STATUS.idle, output: "", playwrightLog: "", apiResults: [] };
+    const newTest = { id: genId(), description: entry.description, source: entry.jiraKey ? "jira" : "manual", jiraKey: entry.jiraKey || null, jiraSummary: "", status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] };
     setTests((current) => [...current, newTest]);
     await runSingleTest(newTest.id, newTest.description, newTest.jiraKey);
     return true;
