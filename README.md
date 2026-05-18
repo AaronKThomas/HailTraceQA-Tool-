@@ -32,25 +32,25 @@ hailtrace-qa/
 npm install
 ```
 
-2. Optional: create a local env file for backend secrets later:
+1. Optional: create a local env file for backend secrets later:
 
 ```bash
 cp .env.example .env
 ```
 
-3. Start the dev server:
+1. Start the dev server:
 
 ```bash
 npm run dev
 ```
 
-4. Start the local mock backend:
+1. Start the local mock backend:
 
 ```bash
 npm run server
 ```
 
-5. Build for production:
+1. Build for production:
 
 ```bash
 npm run build
@@ -70,23 +70,25 @@ The frontend expects a backend with these endpoints:
 - `POST /notifications/slack`
 - `POST /notifications/slack/test`
 
-This repo now includes a minimal `server.js` mock backend for local preview and UI development. It stores registered accounts in `data/accounts.json` and returns simulated QA, Jira, and Slack responses.
+This repo now includes a minimal `server.js` mock backend for local preview and UI development. It stores registered accounts in `data/accounts.json` and returns simulated QA, Jira, and potential Slack responses.
 
 ## Environment Variables
 
 Backend configuration lives in a root `.env` file (never in the frontend). Copy `.env.example` to `.env`, add your keys, and restart `npm run server`.
 
-| Variable | Turns on |
-|----------|----------|
-| `HAILTRACE_API_BASE_URL` + `HAILTRACE_API_KEY` | Live QA via HailTrace API |
-| `HAILTRACE_QA_PATH` | API path (default `/qa/run-test`) |
-| `HAILTRACE_AUTH_STYLE` | `bearer` or `api-key` |
-| `JIRA_BASE_URL` + `JIRA_EMAIL` + `JIRA_API_TOKEN` | Live Jira ticket fetch |
-| `SLACK_WEBHOOK_URL` | Live Slack notifications |
+
+| Variable                                          | Turns on                          |
+| ------------------------------------------------- | --------------------------------- |
+| `HAILTRACE_API_BASE_URL` + `HAILTRACE_API_KEY`    | Live QA via HailTrace API         |
+| `HAILTRACE_QA_PATH`                               | API path (default `/qa/run-test`) |
+| `HAILTRACE_AUTH_STYLE`                            | `bearer` or `api-key`             |
+| `JIRA_BASE_URL` + `JIRA_EMAIL` + `JIRA_API_TOKEN` | Live Jira ticket fetch            |
+| `SLACK_WEBHOOK_URL`                               | Live Slack notifications          |
+
 
 Check mode at `GET http://localhost:3001/health` — each integration reports `live` or `demo`.
 
-Integration code: [`server/integrations.mjs`](server/integrations.mjs). Demo fallbacks remain in [`server.js`](server.js) when credentials are missing.
+Integration code: `[server/integrations.mjs](server/integrations.mjs)`. Demo fallbacks remain in `[server.js](server.js)` when credentials are missing.
 
 ## Current Notes
 
@@ -97,8 +99,7 @@ Integration code: [`server/integrations.mjs`](server/integrations.mjs). Demo fal
 - The suite scheduler UI currently supports `Off` and `On Login`
 - Without `.env` credentials the backend runs in **demo** mode; with keys it calls the real services automatically
 
-## Reviewer Notes
-
 - `App.jsx` is intentionally the composition root only. The heavier behavior lives in `useAuth`, `useTests`, `useSuites`, and `useAccounts`.
 - `server.js` is intentionally a contract-preserving mock so the UI can be reviewed without live third-party credentials.
 - The next production-facing steps are straightforward: replace file-backed auth, implement real HailTrace/Jira/Slack service layers behind the backend routes, and add focused lint/tests around hooks and route contracts.
+
