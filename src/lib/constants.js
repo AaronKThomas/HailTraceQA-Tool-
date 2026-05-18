@@ -31,8 +31,15 @@ export const ALL_TABS = ["tests", "history", "settings", "templates", "suites", 
 export const DASHBOARD_ENDPOINTS = [
   { label: "Health", method: "GET", path: "/health" },
   { label: "Accounts", method: "GET", path: "/accounts" },
-  { label: "Run Test", method: "POST", path: "/run-test" },
+  { label: "Run Test", method: "POST", path: "/run-test", okStatuses: [200, 400] },
 ];
+
+export const INTEGRATION_LABELS = {
+  openai: "OpenAI",
+  hailtrace: "HailTrace API",
+  jira: "Jira",
+  slack: "Slack",
+};
 
 export const defaultSettings = {
   backendUrl: CONFIG_DEFAULTS.backendUrl,

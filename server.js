@@ -263,6 +263,15 @@ function buildMockAnalysis(description, jiraKey) {
   };
 }
 
+function safeHostname(value) {
+  if (!value) return "";
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return "";
+  }
+}
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -273,6 +282,13 @@ app.get("/health", (_req, res) => {
       jira: hasRealJiraConfig() ? "live" : "demo",
       slack: hasRealSlackConfig() ? "live" : "demo",
       openai: hasOpenAiConfig() ? "live" : "demo",
+    },
+    details: {
+      openaiModel: hasOpenAiConfig() ? CONFIG.openaiModel : null,
+      hailtraceHost: safeHostname(CONFIG.hailtraceApiBaseUrl),
+      hailtraceQaPath: CONFIG.hailtraceQaPath,
+      jiraHost: safeHostname(CONFIG.jiraBaseUrl),
+      slackConfigured: hasRealSlackConfig(),
     },
   });
 });

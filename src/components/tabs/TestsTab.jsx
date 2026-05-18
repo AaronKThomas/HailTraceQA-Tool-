@@ -97,7 +97,10 @@ export default function TestsTab({
       <div className="input-card stagger" style={{ animationDelay: "0ms" }}>
         <div className="input-header">
           <span className="input-label">New Test</span>
-          <span className="jira-hint" style={{ display: jiraDetected ? "block" : "none" }}>Jira ticket detected</span>
+          <div className="input-header-meta">
+            <span className="jira-hint" style={{ display: jiraDetected ? "inline-flex" : "none" }}>Jira ticket detected</span>
+            <span className="powered-by">Powered by OpenAI</span>
+          </div>
         </div>
         <textarea
           id="test-input"

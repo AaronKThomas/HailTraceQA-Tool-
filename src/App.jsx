@@ -9,7 +9,7 @@ import SuitesTab from "./components/tabs/SuitesTab";
 import TemplatesTab from "./components/tabs/TemplatesTab";
 import TestsTab from "./components/tabs/TestsTab";
 import { DASHBOARD_ENDPOINTS } from "./lib/constants";
-import { checkEndpoint, pingServer, testSlackWebhookRequest } from "./lib/api";
+import { checkEndpoint, fetchHealth, pingServer, testSlackWebhookRequest } from "./lib/api";
 import { writeJson } from "./lib/storage";
 import { exportSuiteReport, exportTestsReport } from "./lib/export";
 import { genId } from "./lib/utils";
@@ -265,6 +265,7 @@ export default function App() {
           <DashboardTab
             onRefresh={() => Promise.all(DASHBOARD_ENDPOINTS.map((endpoint) => checkEndpoint(settings.backendUrl, endpoint.path, endpoint.method)))}
             onCustomCheck={(path, method) => checkEndpoint(settings.backendUrl, path, method)}
+            onFetchHealth={() => fetchHealth(settings.backendUrl)}
           />
         );
       case "settings":

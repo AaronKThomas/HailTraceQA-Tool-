@@ -7,6 +7,16 @@ export async function pingServer(backendUrl) {
   }
 }
 
+export async function fetchHealth(backendUrl) {
+  try {
+    const response = await fetch(`${backendUrl}/health`);
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function loginRequest(backendUrl, username, password) {
   const response = await fetch(`${backendUrl}/login`, {
     method: "POST",
