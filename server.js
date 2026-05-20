@@ -11,6 +11,23 @@ import {
   shouldLoadJiraTicket,
 } from "./server/jiraKey.mjs";
 import { loadEnv } from "./server/loadEnv.mjs";
+import {
+  applySecurityHeaders,
+  buildCorsOptions,
+  clearSessionCookie,
+  createRateLimiter,
+  getClientIp,
+  getSessionCookieName,
+  hashPassword,
+  parseCookies,
+  readSessionCookie,
+  requireNonEmptyString,
+  setSessionCookie,
+  validateDisplayName,
+  validatePassword,
+  validateUsername,
+  verifyPassword,
+} from "./server/security.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +37,7 @@ await loadEnv(__dirname);
 const PORT = Number(process.env.PORT || 3001);
 const DATA_DIR = path.join(__dirname, "data");
 const ACCOUNTS_FILE = path.join(DATA_DIR, "accounts.json");
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 function buildConfig() {
   return {
@@ -34,6 +52,15 @@ function buildConfig() {
     jiraApiToken: process.env.JIRA_API_TOKEN || "",
     openaiApiKey: process.env.OPENAI_API_KEY || "",
     openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
+    sessionSecret: process.env.SESSION_SECRET || (IS_PRODUCTION ? "" : "local-dev-session-secret-change-me"),
+    corsAllowedOrigins: String(
+      process.env.CORS_ALLOWED_ORIGINS
+      || "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3001,http://127.0.0.1:3001",
+    )
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+    allowDemoMode: String(process.env.ALLOW_DEMO_MODE || (!IS_PRODUCTION)).toLowerCase() === "true",
   };
 }
 
@@ -41,8 +68,31 @@ const CONFIG = buildConfig();
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+const authRateLimit = createRateLimiter({ windowMs: 15 * 60 * 1000, limit: 10, keyPrefix: "auth" });
+const registerRateLimit = createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 20, keyPrefix: "register" });
+const runTestRateLimit = createRateLimiter({ windowMs: 5 * 60 * 1000, limit: 30, keyPrefix: "run-test" });
+const notificationRateLimit = createRateLimiter({ windowMs: 5 * 60 * 1000, limit: 20, keyPrefix: "notify" });
+const jiraRateLimit = createRateLimiter({ windowMs: 5 * 60 * 1000, limit: 60, keyPrefix: "jira" });
+
+app.use(applySecurityHeaders);
+app.use(cors(buildCorsOptions(CONFIG.corsAllowedOrigins)));
+app.use(express.json({ limit: "64kb" }));
+
+function isSecureRequest(req) {
+  return req.secure || req.headers["x-forwarded-proto"] === "https";
+}
+
+function getDemoAllowed() {
+  return CONFIG.allowDemoMode;
+}
+
+function ensureDemoAllowed(res, feature) {
+  if (getDemoAllowed()) return true;
+  res.status(503).json({
+    error: `${feature} is not configured. Demo mode is disabled in production.`,
+  });
+  return false;
+}
 
 async function ensureDataDir() {
   await fs.mkdir(DATA_DIR, { recursive: true });
@@ -70,7 +120,36 @@ function sanitizeAccount(account) {
     username: account.username,
     displayName: account.displayName,
     registeredAt: account.registeredAt,
+    role: account.role || "tester",
   };
+}
+
+function normalizeAccount(account) {
+  return {
+    username: String(account.username || "").trim(),
+    displayName: String(account.displayName || "").trim(),
+    registeredAt: account.registeredAt,
+    role: account.role === "admin" ? "admin" : "tester",
+    passwordHash: account.passwordHash || "",
+    passwordSalt: account.passwordSalt || "",
+    password: account.password || "",
+  };
+}
+
+async function ensureAccountBaseline() {
+  const accounts = (await readAccounts()).map(normalizeAccount);
+  if (!accounts.length) return;
+
+  const hasAdmin = accounts.some((account) => account.role === "admin");
+  if (hasAdmin) return;
+
+  const [first, ...rest] = accounts;
+  const promoted = {
+    ...first,
+    role: "admin",
+  };
+  await writeAccounts([promoted, ...rest]);
+  console.warn(`[auth] Promoted ${promoted.username} to admin to recover legacy account data with no admin role.`);
 }
 
 function hasRealJiraConfig() {
@@ -93,6 +172,10 @@ function hasOpenAiConfig() {
   return Boolean(CONFIG.openaiApiKey);
 }
 
+function hasSessionSecret() {
+  return Boolean(CONFIG.sessionSecret);
+}
+
 function getRuntimeMode() {
   const probes = [
     hasRealHailTraceConfig(),
@@ -106,6 +189,11 @@ function getRuntimeMode() {
   if (live === 0) return "mock";
   if (live >= probes.length) return "live";
   return "hybrid";
+}
+
+function ensureSessionSecret() {
+  if (hasSessionSecret()) return;
+  throw new Error("SESSION_SECRET is required. Generate a long random value for signed session cookies.");
 }
 
 function validateConfig() {
@@ -157,7 +245,7 @@ function validateConfig() {
 }
 
 async function resolveTestInput(description, jiraKey) {
-  let text = String(description).trim();
+  let text = requireNonEmptyString(description, "Description", { min: 3, max: 10000 });
   let ticketKey = jiraKey ? String(jiraKey).toUpperCase() : parseJiraKey(text);
 
   if (ticketKey && hasRealJiraConfig() && shouldLoadJiraTicket(text, ticketKey)) {
@@ -174,6 +262,40 @@ async function resolveTestInput(description, jiraKey) {
 
   return { text, ticketKey: ticketKey || null };
 }
+
+function applyRateLimit(req, res, limiter, scope) {
+  const ip = getClientIp(req);
+  const key = req.user ? `${req.user.username}:${ip}` : ip;
+  const result = limiter(key);
+  if (result.ok) return true;
+  res.setHeader("Retry-After", String(Math.ceil((result.retryAfterMs || 1000) / 1000)));
+  res.status(429).json({ error: `Too many ${scope} requests. Please try again later.` });
+  return false;
+}
+
+function attachSession(req, _res, next) {
+  req.cookies = parseCookies(req.headers.cookie || "");
+  const sessionValue = req.cookies[getSessionCookieName()];
+  req.session = hasSessionSecret() ? readSessionCookie(CONFIG.sessionSecret, sessionValue) : null;
+  req.user = req.session || null;
+  next();
+}
+
+function requireAuth(req, res, next) {
+  if (!req.user?.username) {
+    return res.status(401).json({ error: "Authentication required." });
+  }
+  return next();
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ error: "Admin access required." });
+  }
+  return next();
+}
+
+app.use(attachSession);
 
 function buildMockAnalysis(description, jiraKey) {
   const lower = description.toLowerCase();
@@ -304,6 +426,8 @@ app.get("/health", (_req, res) => {
       jiraHost: safeHostname(CONFIG.jiraBaseUrl),
       slackConfigured: hasRealSlackConfig(),
       zohoCliqConfigured: hasRealZohoCliqConfig(),
+      demoModeAllowed: getDemoAllowed(),
+      sessionConfigured: hasSessionSecret(),
     },
   });
 });
@@ -442,56 +566,131 @@ app.get("/health/integrations", async (_req, res) => {
 });
 
 app.post("/login", async (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password) {
-    return res.status(400).json({ error: "Username and password are required." });
+  if (!applyRateLimit(req, res, authRateLimit, "login")) return undefined;
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) {
+      return res.status(400).json({ error: "Username and password are required." });
+    }
+
+    const usernameValue = validateUsername(username);
+    const passwordValue = String(password);
+    const accounts = (await readAccounts()).map(normalizeAccount);
+    const match = accounts.find(
+      (account) =>
+        account.username.toLowerCase() === usernameValue.toLowerCase(),
+    );
+
+    let authenticated = false;
+    let upgradedAccount = null;
+    if (match) {
+      if (match.passwordHash && match.passwordSalt) {
+        authenticated = await verifyPassword(passwordValue, match);
+      } else if (match.password && match.password === passwordValue) {
+        authenticated = true;
+        const passwordData = await hashPassword(passwordValue);
+        upgradedAccount = { ...match, ...passwordData, password: "" };
+      }
+    }
+
+    if (!authenticated || !match) {
+      return res.status(401).json({ error: "Incorrect username or password." });
+    }
+
+    if (upgradedAccount) {
+      await writeAccounts(accounts.map((account) => account.username === upgradedAccount.username ? upgradedAccount : account));
+    }
+
+    ensureSessionSecret();
+    setSessionCookie(res, CONFIG.sessionSecret, upgradedAccount || match, isSecureRequest(req));
+    return res.json({ account: sanitizeAccount(upgradedAccount || match) });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Login failed." });
   }
-
-  const accounts = await readAccounts();
-  const match = accounts.find(
-    (account) =>
-      account.username.toLowerCase() === String(username).toLowerCase()
-      && account.password === password,
-  );
-
-  if (!match) {
-    return res.status(401).json({ error: "Incorrect username or password." });
-  }
-
-  return res.json({ account: sanitizeAccount(match) });
 });
 
 app.post("/register", async (req, res) => {
-  const { username, displayName, password } = req.body || {};
-  if (!username || !displayName || !password) {
-    return res.status(400).json({ error: "Username, display name, and password are required." });
+  if (!applyRateLimit(req, res, registerRateLimit, "registration")) return undefined;
+  try {
+    const { username, displayName, password } = req.body || {};
+    if (!username || !displayName || !password) {
+      return res.status(400).json({ error: "Username, display name, and password are required." });
+    }
+
+    const usernameValue = validateUsername(username);
+    const displayNameValue = validateDisplayName(displayName);
+    const passwordValue = validatePassword(password);
+    const accounts = (await readAccounts()).map(normalizeAccount);
+    const isBootstrap = accounts.length === 0;
+
+    if (!isBootstrap) {
+      if (!req.user?.username) {
+        return res.status(401).json({ error: "An authenticated admin must create new users." });
+      }
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ error: "Only admins can create users." });
+      }
+    }
+
+    if (accounts.some((account) => account.username.toLowerCase() === usernameValue.toLowerCase())) {
+      return res.status(409).json({ error: "Username already taken." });
+    }
+
+    const passwordData = await hashPassword(passwordValue);
+    const account = {
+      username: usernameValue,
+      displayName: displayNameValue,
+      role: isBootstrap ? "admin" : "tester",
+      ...passwordData,
+      registeredAt: new Date().toISOString(),
+    };
+
+    accounts.push(account);
+    await writeAccounts(accounts);
+    if (isBootstrap) {
+      ensureSessionSecret();
+      setSessionCookie(res, CONFIG.sessionSecret, account, isSecureRequest(req));
+    }
+    return res.status(201).json({ account: sanitizeAccount(account) });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Registration failed." });
   }
-
-  const accounts = await readAccounts();
-  if (accounts.some((account) => account.username.toLowerCase() === String(username).toLowerCase())) {
-    return res.status(409).json({ error: "Username already taken." });
-  }
-
-  const account = {
-    username: String(username).trim(),
-    displayName: String(displayName).trim(),
-    password: String(password),
-    registeredAt: new Date().toISOString(),
-  };
-
-  accounts.push(account);
-  await writeAccounts(accounts);
-  return res.status(201).json({ account: sanitizeAccount(account) });
 });
 
-app.get("/accounts", async (_req, res) => {
+app.post("/logout", requireAuth, (req, res) => {
+  clearSessionCookie(res, isSecureRequest(req));
+  res.status(204).send();
+});
+
+app.get("/session", (req, res) => {
+  if (!req.user?.username) {
+    return res.json({ authenticated: false });
+  }
+  return res.json({
+    authenticated: true,
+    account: {
+      username: req.user.username,
+      displayName: req.user.displayName,
+      role: req.user.role || "tester",
+    },
+  });
+});
+
+app.get("/accounts", requireAuth, requireAdmin, async (_req, res) => {
   const accounts = await readAccounts();
   res.json(accounts.map(sanitizeAccount));
 });
 
-app.delete("/accounts/:username", async (req, res) => {
+app.delete("/accounts/:username", requireAuth, requireAdmin, async (req, res) => {
   const username = String(req.params.username || "").toLowerCase();
   const accounts = await readAccounts();
+  const target = accounts.find((account) => account.username.toLowerCase() === username);
+  if (target?.role === "admin") {
+    const adminCount = accounts.filter((account) => (account.role || "tester") === "admin").length;
+    if (adminCount <= 1) {
+      return res.status(400).json({ error: "Cannot remove the last admin account." });
+    }
+  }
   const nextAccounts = accounts.filter((account) => account.username.toLowerCase() !== username);
 
   if (nextAccounts.length === accounts.length) {
@@ -502,13 +701,21 @@ app.delete("/accounts/:username", async (req, res) => {
   return res.status(204).send();
 });
 
-app.post("/run-test", async (req, res) => {
-  const { description, jiraKey } = req.body || {};
-  if (!description) {
-    return res.status(400).json({ error: "Description is required." });
+app.post("/run-test", requireAuth, async (req, res) => {
+  if (!applyRateLimit(req, res, runTestRateLimit, "test execution")) return undefined;
+  let text;
+  let ticketKey;
+  try {
+    const { description, jiraKey } = req.body || {};
+    if (!description) {
+      return res.status(400).json({ error: "Description is required." });
+    }
+    const resolved = await resolveTestInput(description, jiraKey);
+    text = resolved.text;
+    ticketKey = resolved.ticketKey;
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Invalid test request." });
   }
-
-  const { text, ticketKey } = await resolveTestInput(description, jiraKey);
 
   if (hasOpenAiConfig()) {
     try {
@@ -562,10 +769,12 @@ app.post("/run-test", async (req, res) => {
     }
   }
 
+  if (!ensureDemoAllowed(res, "HailTrace QA")) return undefined;
   return res.json(buildMockAnalysis(text, ticketKey));
 });
 
-app.get("/jira/issue/:key", async (req, res) => {
+app.get("/jira/issue/:key", requireAuth, async (req, res) => {
+  if (!applyRateLimit(req, res, jiraRateLimit, "Jira")) return undefined;
   const key = String(req.params.key || "").toUpperCase();
   if (!key) {
     return res.status(400).json({ error: "Issue key is required." });
@@ -580,6 +789,7 @@ app.get("/jira/issue/:key", async (req, res) => {
     }
   }
 
+  if (!ensureDemoAllowed(res, "Jira")) return undefined;
   return res.json({
     key,
     summary: `Demo Jira ticket ${key}`,
@@ -588,7 +798,8 @@ app.get("/jira/issue/:key", async (req, res) => {
   });
 });
 
-app.post("/notifications/slack", async (req, res) => {
+app.post("/notifications/slack", requireAuth, async (req, res) => {
+  if (!applyRateLimit(req, res, notificationRateLimit, "notification")) return undefined;
   const { description, status, verdict } = req.body || {};
 
   if (hasRealSlackConfig()) {
@@ -600,6 +811,7 @@ app.post("/notifications/slack", async (req, res) => {
     }
   }
 
+  if (!ensureDemoAllowed(res, "Slack")) return undefined;
   return res.json({
     ok: true,
     mode: "demo",
@@ -610,7 +822,8 @@ app.post("/notifications/slack", async (req, res) => {
   });
 });
 
-app.post("/notifications/slack/test", async (req, res) => {
+app.post("/notifications/slack/test", requireAuth, async (req, res) => {
+  if (!applyRateLimit(req, res, notificationRateLimit, "notification")) return undefined;
   if (hasRealSlackConfig()) {
     try {
       const result = await sendSlackWebhook(CONFIG, {
@@ -622,6 +835,7 @@ app.post("/notifications/slack/test", async (req, res) => {
     }
   }
 
+  if (!ensureDemoAllowed(res, "Slack")) return undefined;
   return res.json({
     ok: true,
     mode: "demo",
@@ -630,7 +844,8 @@ app.post("/notifications/slack/test", async (req, res) => {
   });
 });
 
-app.post("/notifications/zoho-cliq", async (req, res) => {
+app.post("/notifications/zoho-cliq", requireAuth, async (req, res) => {
+  if (!applyRateLimit(req, res, notificationRateLimit, "notification")) return undefined;
   const { description, status, verdict } = req.body || {};
 
   if (hasRealZohoCliqConfig()) {
@@ -642,6 +857,7 @@ app.post("/notifications/zoho-cliq", async (req, res) => {
     }
   }
 
+  if (!ensureDemoAllowed(res, "Zoho Cliq")) return undefined;
   return res.json({
     ok: true,
     mode: "demo",
@@ -652,7 +868,8 @@ app.post("/notifications/zoho-cliq", async (req, res) => {
   });
 });
 
-app.post("/notifications/zoho-cliq/test", async (req, res) => {
+app.post("/notifications/zoho-cliq/test", requireAuth, async (req, res) => {
+  if (!applyRateLimit(req, res, notificationRateLimit, "notification")) return undefined;
   if (hasRealZohoCliqConfig()) {
     try {
       const result = await sendZohoCliqWebhook(CONFIG, {
@@ -664,6 +881,7 @@ app.post("/notifications/zoho-cliq/test", async (req, res) => {
     }
   }
 
+  if (!ensureDemoAllowed(res, "Zoho Cliq")) return undefined;
   return res.json({
     ok: true,
     mode: "demo",
@@ -672,8 +890,23 @@ app.post("/notifications/zoho-cliq/test", async (req, res) => {
   });
 });
 
+app.use((error, _req, res, _next) => {
+  console.error(`[server] ${error.message}`);
+  if (res.headersSent) return undefined;
+  if (String(error.message || "").includes("CORS")) {
+    return res.status(403).json({ error: "Origin not allowed." });
+  }
+  return res.status(500).json({ error: "Internal server error." });
+});
+
+await ensureAccountBaseline();
+
 app.listen(PORT, () => {
   validateConfig();
+  if (IS_PRODUCTION && !hasSessionSecret()) {
+    console.error("SESSION_SECRET is required in production.");
+    process.exit(1);
+  }
   console.log(`HailTrace QA backend listening on http://localhost:${PORT}`);
   console.log(`Mode: ${getRuntimeMode()}`);
   console.log(`  HailTrace QA: ${hasRealHailTraceConfig() ? "live" : "demo"}`);
@@ -681,4 +914,5 @@ app.listen(PORT, () => {
   console.log(`  Slack:        ${hasRealSlackConfig() ? "live" : "demo"}`);
   console.log(`  Zoho Cliq:    ${hasRealZohoCliqConfig() ? "live" : "demo"}`);
   console.log(`  OpenAI:       ${hasOpenAiConfig() ? "live" : "demo"}`);
+  console.log(`  Demo mode:    ${getDemoAllowed() ? "enabled" : "disabled"}`);
 });

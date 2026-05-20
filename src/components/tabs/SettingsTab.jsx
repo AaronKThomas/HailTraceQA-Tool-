@@ -158,6 +158,7 @@ export default function SettingsTab({
           <div className="settings-row-body">
             <div className="settings-row-label">Display Name</div>
             <input className="settings-input" value={form.displayName || currentUser.displayName} onChange={(event) => updateField("displayName", event.target.value)} />
+            <div className="settings-row-desc" style={{ marginTop: 6 }}>Role: {currentUser.role === "admin" ? "Admin" : "Tester"}</div>
           </div>
         </div>
         <div className="settings-row">
@@ -169,46 +170,48 @@ export default function SettingsTab({
         </div>
       </div>
 
-      <div className="settings-section stagger" style={{ animationDelay: "170ms" }}>
-        <div className="settings-section-title">Admin — User Management</div>
-        <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 10 }}>Add New User</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-            <input className="settings-input" placeholder="Username" value={newUser.username} onChange={(event) => setNewUser((current) => ({ ...current, username: event.target.value }))} />
-            <input className="settings-input" placeholder="Display Name" value={newUser.displayName} onChange={(event) => setNewUser((current) => ({ ...current, displayName: event.target.value }))} />
+      {currentUser.role === "admin" ? (
+        <div className="settings-section stagger" style={{ animationDelay: "170ms" }}>
+          <div className="settings-section-title">Admin — User Management</div>
+          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 10 }}>Add New User</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              <input className="settings-input" placeholder="Username" value={newUser.username} onChange={(event) => setNewUser((current) => ({ ...current, username: event.target.value }))} />
+              <input className="settings-input" placeholder="Display Name" value={newUser.displayName} onChange={(event) => setNewUser((current) => ({ ...current, displayName: event.target.value }))} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+              <input className="settings-input" type="password" placeholder="Password (12+ chars)" value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} />
+              <input className="settings-input" type="password" placeholder="Confirm Password" value={newUser.confirm} onChange={(event) => setNewUser((current) => ({ ...current, confirm: event.target.value }))} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button className="settings-save-btn" style={{ marginTop: 0 }} onClick={handleAddUser}>Add User</button>
+              <span style={{ fontSize: 12, color: adminMessage.startsWith("✓") ? "var(--pass)" : "var(--fail)" }}>{adminMessage}</span>
+            </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-            <input className="settings-input" type="password" placeholder="Password" value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} />
-            <input className="settings-input" type="password" placeholder="Confirm Password" value={newUser.confirm} onChange={(event) => setNewUser((current) => ({ ...current, confirm: event.target.value }))} />
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button className="settings-save-btn" style={{ marginTop: 0 }} onClick={handleAddUser}>Add User</button>
-            <span style={{ fontSize: 12, color: adminMessage.startsWith("✓") ? "var(--pass)" : "var(--fail)" }}>{adminMessage}</span>
+          <div>
+            {!accounts.length ? (
+              <div style={{ padding: 16, color: "var(--muted)", fontSize: 13 }}>No accounts found or your session does not have access.</div>
+            ) : (
+              <table className="admin-table">
+                <thead>
+                  <tr><th>Username</th><th>Display Name</th><th>Role</th><th>Added</th><th /></tr>
+                </thead>
+                <tbody>
+                  {accounts.map((account) => (
+                    <tr key={account.username}>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{account.username}</td>
+                      <td>{account.displayName}</td>
+                      <td><span className="admin-badge" style={{ background: account.role === "admin" ? "rgba(10,132,255,0.15)" : "rgba(48,209,88,0.15)", color: account.role === "admin" ? "var(--accent)" : "var(--pass)" }}>{account.role}</span></td>
+                      <td style={{ color: "var(--muted)", fontSize: 12 }}>{account.registeredAt ? new Date(account.registeredAt).toLocaleDateString() : "—"}</td>
+                      <td>{account.username !== currentUser.username ? <button className="danger-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => onRemoveUser(account.username)}>Remove</button> : null}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
-        <div>
-          {!accounts.length ? (
-            <div style={{ padding: 16, color: "var(--muted)", fontSize: 13 }}>No accounts found. Make sure the server is running.</div>
-          ) : (
-            <table className="admin-table">
-              <thead>
-                <tr><th>Username</th><th>Display Name</th><th>Type</th><th>Added</th><th /></tr>
-              </thead>
-              <tbody>
-                {accounts.map((account) => (
-                  <tr key={account.username}>
-                    <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{account.username}</td>
-                    <td>{account.displayName}</td>
-                    <td><span className="admin-badge" style={{ background: account.type === "hardcoded" ? "rgba(10,132,255,0.15)" : "rgba(48,209,88,0.15)", color: account.type === "hardcoded" ? "var(--accent)" : "var(--pass)" }}>{account.type}</span></td>
-                    <td style={{ color: "var(--muted)", fontSize: 12 }}>{account.registeredAt ? new Date(account.registeredAt).toLocaleDateString() : "—"}</td>
-                    <td>{account.type !== "hardcoded" ? <button className="danger-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => onRemoveUser(account.username)}>Remove</button> : null}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
+      ) : null}
 
       <div className="stagger" style={{ animationDelay: "200ms", display: "flex", alignItems: "center", paddingBottom: 32 }}>
         <button className="settings-save-btn" onClick={handleSave}>Save Settings</button>

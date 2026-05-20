@@ -26,7 +26,7 @@ export default function LoginScreen({ onLogin, onRegister }) {
         await onLogin(form.username.trim(), form.password);
       } else {
         if (form.password !== form.confirm) throw new Error("Passwords don't match.");
-        if (form.password.length < 4) throw new Error("Password must be at least 4 characters.");
+        if (form.password.length < 12) throw new Error("Password must be at least 12 characters.");
         await onRegister({
           username: form.username.trim(),
           displayName: form.displayName.trim(),
@@ -73,7 +73,7 @@ export default function LoginScreen({ onLogin, onRegister }) {
           )}
           <div className="field-group">
             <label>Password</label>
-            <input type="password" value={form.password} onChange={(event) => updateField("password", event.target.value)} placeholder="••••••" onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
+            <input type="password" value={form.password} onChange={(event) => updateField("password", event.target.value)} placeholder={mode === "register" ? "12+ characters" : "••••••"} onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
           </div>
           {mode === "register" && (
             <div className="field-group">

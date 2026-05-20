@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "server": "node server.js",
+    "test": "node --test",
+    "check:prod": "node scripts/check-production-readiness.mjs",
+    "checklist": "node scripts/internal-publish-checklist.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },

@@ -21,9 +21,9 @@ export function useExportConfirmation(onExport, {
     setPendingFormat(null);
   }, []);
 
-  const confirmExport = useCallback(() => {
+  const confirmExport = useCallback(async () => {
     if (!pendingFormat) return;
-    onExport(pendingFormat);
+    await onExport(pendingFormat);
     setPendingFormat(null);
   }, [onExport, pendingFormat]);
 

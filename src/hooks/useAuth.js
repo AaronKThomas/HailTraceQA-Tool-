@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { loginRequest, registerRequest } from "../lib/api";
+import { fetchSession, loginRequest, logoutRequest, registerRequest } from "../lib/api";
 import { defaultSettings } from "../lib/constants";
-import { readJson, removeJson, writeJson } from "../lib/storage";
-
-const SESSION_KEY = "hailtrace-qa:session";
+import { readJson } from "../lib/storage";
 
 function getUserKey(prefix, username) {
   return `${prefix}:${username}`;
@@ -21,13 +19,6 @@ export function useAuth() {
   const hydrateUser = useCallback((account) => {
     const savedSettings = readJson(getUserKey("settings", account.username), {}) || {};
 
-    // User hydration is the boundary between the anonymous shell and the
-    // persisted per-user workspace stored in the browser.
-    writeJson(SESSION_KEY, {
-      username: account.username,
-      displayName: account.displayName,
-      registeredAt: account.registeredAt,
-    });
     setCurrentUser(account);
     setHistory((readJson(getUserKey("history", account.username), []) || []).map((entry) => ({
       ...entry,
@@ -54,22 +45,50 @@ export function useAuth() {
   }, [hydrateUser, settings.backendUrl]);
 
   const handleLogout = useCallback(() => {
-    removeJson(SESSION_KEY);
+    logoutRequest(settings.backendUrl).catch(() => {});
     setCurrentUser(null);
     setHistory([]);
     setTemplates([]);
     setSuites([]);
-    setSettings(defaultSettings);
+    setSettings((current) => ({
+      ...defaultSettings,
+      backendUrl: current.backendUrl || defaultSettings.backendUrl,
+    }));
     setTestDraft("");
-  }, []);
+  }, [settings.backendUrl]);
 
   useEffect(() => {
-    const savedSession = readJson(SESSION_KEY);
-    if (savedSession?.username) {
-      hydrateUser(savedSession);
-    }
-    setAuthReady(true);
+    let active = true;
+    const savedSession = readJson("hailtrace-qa:session:last", {}) || {};
+    const savedBackendUrl = typeof savedSession.backendUrl === "string" && savedSession.backendUrl.trim()
+      ? savedSession.backendUrl.trim()
+      : defaultSettings.backendUrl;
+
+    fetchSession(savedBackendUrl).then((account) => {
+      if (!active) return;
+      if (account?.username) {
+        hydrateUser(account);
+        setSettings((current) => ({
+          ...current,
+          backendUrl: savedBackendUrl,
+        }));
+      }
+      setAuthReady(true);
+    }).catch(() => {
+      if (active) setAuthReady(true);
+    });
+    return () => {
+      active = false;
+    };
   }, [hydrateUser]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("hailtrace-qa:session:last", JSON.stringify({
+        backendUrl: settings.backendUrl,
+      }));
+    } catch {}
+  }, [settings.backendUrl]);
 
   return {
     authReady,

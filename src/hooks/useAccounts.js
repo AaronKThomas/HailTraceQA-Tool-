@@ -11,7 +11,7 @@ export function useAccounts(backendUrl, currentUser) {
   }, [backendUrl]);
 
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || currentUser.role !== "admin") {
       setAccounts([]);
       return;
     }
@@ -23,7 +23,7 @@ export function useAccounts(backendUrl, currentUser) {
       throw new Error("All fields required.");
     }
     if (newUser.password !== newUser.confirm) throw new Error("Passwords don't match.");
-    if (newUser.password.length < 4) throw new Error("Min 4 characters.");
+    if (newUser.password.length < 12) throw new Error("Min 12 characters.");
     await registerRequest(backendUrl, {
       username: newUser.username.trim(),
       displayName: newUser.displayName.trim(),

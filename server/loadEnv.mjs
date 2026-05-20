@@ -4,8 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export async function loadEnv(rootDir = path.join(__dirname, "..")) {
-  const envPath = path.join(rootDir, ".env");
+async function loadEnvFile(envPath, { override = false } = {}) {
   try {
     const raw = await fs.readFile(envPath, "utf8");
     for (const line of raw.split("\n")) {
@@ -21,11 +20,20 @@ export async function loadEnv(rootDir = path.join(__dirname, "..")) {
       ) {
         value = value.slice(1, -1);
       }
-      if (!(key in process.env)) process.env[key] = value;
+      if (override || !(key in process.env)) process.env[key] = value;
     }
   } catch (error) {
     if (error.code !== "ENOENT") {
       console.warn(`[config] Could not read ${envPath}: ${error.message}`);
     }
+  }
+}
+
+export async function loadEnv(rootDir = path.join(__dirname, "..")) {
+  await loadEnvFile(path.join(rootDir, ".env"));
+
+  const nodeEnv = String(process.env.NODE_ENV || "").trim();
+  if (nodeEnv) {
+    await loadEnvFile(path.join(rootDir, `.env.${nodeEnv}`), { override: true });
   }
 }

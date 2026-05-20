@@ -1,4 +1,3 @@
-import { jsPDF } from "jspdf";
 import { STATUS_CONFIG } from "./constants";
 
 export const EXPORT_FORMATS = [
@@ -149,7 +148,8 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function buildTestsPdf(meta, rows) {
+async function buildTestsPdf(meta, rows) {
+  const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const margin = 48;
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -205,7 +205,7 @@ function buildTestsPdf(meta, rows) {
   return doc;
 }
 
-export function exportTestsReport(tests, format, currentUser) {
+export async function exportTestsReport(tests, format, currentUser) {
   const meta = buildTestsReportMeta(tests, currentUser);
   const rows = normalizeTestRows(tests);
   const stamp = dateStamp();
@@ -221,14 +221,14 @@ export function exportTestsReport(tests, format, currentUser) {
       downloadBlob(buildTestsHtml(meta, rows), `hailtrace-qa-${stamp}.html`, "text/html");
       return;
     case "pdf":
-      buildTestsPdf(meta, rows).save(`hailtrace-qa-${stamp}.pdf`);
+      (await buildTestsPdf(meta, rows)).save(`hailtrace-qa-${stamp}.pdf`);
       return;
     default:
       downloadBlob(buildTestsTextReport(meta, rows), `hailtrace-qa-${stamp}.txt`, "text/plain");
   }
 }
 
-export function exportSuiteReport(suite, tests, format, currentUser) {
+export async function exportSuiteReport(suite, tests, format, currentUser) {
   if (!suite) return;
 
   const suiteRows = suite.tests.map((test, index) => {
@@ -266,7 +266,7 @@ export function exportSuiteReport(suite, tests, format, currentUser) {
       downloadBlob(buildTestsHtml(meta, suiteRows), `${prefix}.html`, "text/html");
       return;
     case "pdf":
-      buildTestsPdf(meta, suiteRows).save(`${prefix}.pdf`);
+      (await buildTestsPdf(meta, suiteRows)).save(`${prefix}.pdf`);
       return;
     default: {
       const text = [

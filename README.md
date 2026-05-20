@@ -2,7 +2,7 @@
 
 Internal QA tool for the HailTrace team. Testers describe a feature in plain English or paste a Jira ticket, click **Run Test**, and get a structured verdict with recommendations and an execution log.
 
-The React UI talks to a local Node backend (`server.js`). All API keys live in `.env` on the server — never in the browser.
+The React UI talks to a local Node backend (`server.js`). All API keys live in the server-side `.env` file — never in the browser.
 
 ## How it works
 
@@ -77,6 +77,13 @@ Expand a test with **View**:
 
 History, templates, suites, and settings are stored in the browser (`localStorage`). Slack notifications fire from the backend when enabled in settings.
 
+## Security model
+
+- Authentication now uses a signed, `HttpOnly` session cookie issued by the backend.
+- Account creation is admin-only after the first bootstrap account. The first registered user becomes the initial admin.
+- Passwords are stored as salted password hashes on the server, not plaintext.
+- Demo mode is intended for local development. In production, set `ALLOW_DEMO_MODE=false` unless you explicitly want mock responses.
+
 ## Runtime modes
 
 Check what is active:
@@ -106,7 +113,7 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env` with your keys (see table below), then restart the backend whenever you change it.
+Edit `.env` with your values. Restart the backend whenever you change it.
 
 ### 2. Run locally (two terminals)
 
@@ -135,11 +142,15 @@ Serve `dist/` behind your host; run `server.js` separately with the same `.env`.
 
 ## Environment variables
 
-All secrets go in the project root `.env` file (gitignored). Copy from `.env.example`.
+Use a single `.env` file as the source of truth for deployment. It is gitignored. Copy from `.env.example`.
 
 | Variable | Purpose |
 | -------- | ------- |
 | `PORT` | Backend port (default `3001`) |
+| `NODE_ENV` | Set to `production` in deployed environments |
+| `SESSION_SECRET` | Long random secret used to sign session cookies |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated list of allowed frontend origins |
+| `ALLOW_DEMO_MODE` | `true` or `false`; disable mock/demo responses in production |
 | `OPENAI_API_KEY` | ChatGPT — interpret input and summarize results |
 | `OPENAI_MODEL` | Optional model (default `gpt-4o-mini`) |
 | `HAILTRACE_API_BASE_URL` | HailTrace API host |
@@ -183,8 +194,10 @@ The frontend calls these on the backend:
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
 | `GET` | `/health` | Service status and live/demo per integration |
+| `GET` | `/session` | Return the authenticated session, if any |
 | `POST` | `/login` | Sign in |
 | `POST` | `/register` | Create account |
+| `POST` | `/logout` | Clear the current session |
 | `GET` | `/accounts` | List users (sanitized) |
 | `DELETE` | `/accounts/:username` | Remove user |
 | `POST` | `/run-test` | Run QA pipeline (`description`, optional `jiraKey`) |
@@ -198,5 +211,53 @@ The frontend calls these on the backend:
 - **`POST /run-test`** — Resolves Jira if needed (`resolveTestInput`), then OpenAI and/or HailTrace per [runtime modes](#runtime-modes).
 - **Demo fallbacks** in `server.js` keep the UI usable without real credentials.
 - **`App.jsx`** is the composition root; tab logic lives in hooks and `src/components/tabs/`.
+
+## Internal publish checklist
+
+Before deploying this internally:
+
+1. Set `NODE_ENV=production`.
+2. Set a strong `SESSION_SECRET`.
+3. Set `CORS_ALLOWED_ORIGINS` to your real internal frontend origin(s), not `*`.
+4. Set `ALLOW_DEMO_MODE=false` unless you intentionally want mock behavior available.
+5. Configure the real integration keys you want enabled.
+6. Create the first admin account during bootstrap, then use that account to create other users.
+
+## Bootstrap and migration notes
+
+- First-run bootstrap: when `data/accounts.json` is empty, the first successful registration becomes the initial `admin`.
+- Existing local accounts that still have plaintext passwords are upgraded automatically to hashed credentials on their next successful login.
+- After bootstrap, only admins can create or remove users.
+- For an internal deployment, keep the `data/` directory private to the host and back it up as operational data.
+
+## Tests
+
+Run the lightweight security-focused test suite with:
+
+```bash
+npm test
+```
+
+Current coverage focuses on:
+
+- password hashing and verification
+- session cookie signing/tamper rejection
+- auth input validation
+- Jira key parsing and formatting behavior
+
+## Deployment helpers
+
+Two helper scripts are available for internal publish workflows:
+
+```bash
+npm run check:prod
+npm run checklist
+```
+
+- `npm run check:prod`
+  Fails fast when production-critical settings are unsafe or missing, including `NODE_ENV`, `SESSION_SECRET`, explicit CORS origins, demo-mode disablement, and missing admin bootstrap state.
+- `npm run checklist`
+  Prints a human-readable internal publish summary: environment flags, configured integrations, build presence, and account bootstrap state.
+
 
 For integration details, see `server/integrations.mjs` and `server/openai.mjs`.

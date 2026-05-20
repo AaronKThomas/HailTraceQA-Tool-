@@ -1,6 +1,8 @@
 export async function pingServer(backendUrl) {
   try {
-    const response = await fetch(`${backendUrl}/health`);
+    const response = await fetch(`${backendUrl}/health`, {
+      credentials: "include",
+    });
     return response.ok ? "ok" : "error";
   } catch {
     return "error";
@@ -9,7 +11,9 @@ export async function pingServer(backendUrl) {
 
 export async function fetchHealth(backendUrl) {
   try {
-    const response = await fetch(`${backendUrl}/health`);
+    const response = await fetch(`${backendUrl}/health`, {
+      credentials: "include",
+    });
     if (!response.ok) return null;
     return await response.json();
   } catch {
@@ -19,7 +23,9 @@ export async function fetchHealth(backendUrl) {
 
 export async function fetchIntegrationsHealth(backendUrl) {
   try {
-    const response = await fetch(`${backendUrl}/health/integrations`);
+    const response = await fetch(`${backendUrl}/health/integrations`, {
+      credentials: "include",
+    });
     if (!response.ok) return null;
     return await response.json();
   } catch {
@@ -31,6 +37,7 @@ export async function loginRequest(backendUrl, username, password) {
   const response = await fetch(`${backendUrl}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ username, password }),
   });
   const data = await response.json();
@@ -42,6 +49,7 @@ export async function registerRequest(backendUrl, payload) {
   const response = await fetch(`${backendUrl}/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify(payload),
   });
   const data = await response.json();
@@ -49,9 +57,35 @@ export async function registerRequest(backendUrl, payload) {
   return data.account;
 }
 
+export async function logoutRequest(backendUrl) {
+  const response = await fetch(`${backendUrl}/logout`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || "Logout failed.");
+  }
+}
+
+export async function fetchSession(backendUrl) {
+  try {
+    const response = await fetch(`${backendUrl}/session`, {
+      credentials: "include",
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.authenticated ? data.account : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchAllAccounts(backendUrl) {
   try {
-    const response = await fetch(`${backendUrl}/accounts`);
+    const response = await fetch(`${backendUrl}/accounts`, {
+      credentials: "include",
+    });
     return response.ok ? response.json() : [];
   } catch {
     return [];
@@ -66,6 +100,7 @@ export async function fetchRegisteredAccount(backendUrl, username) {
 export async function removeAccount(backendUrl, username) {
   const response = await fetch(`${backendUrl}/accounts/${encodeURIComponent(username)}`, {
     method: "DELETE",
+    credentials: "include",
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -77,6 +112,7 @@ export async function runTestRequest(backendUrl, description, jiraKey) {
   const response = await fetch(`${backendUrl}/run-test`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ description, jiraKey: jiraKey || null }),
   });
   const data = await response.json();
@@ -89,6 +125,7 @@ export async function fetchJiraTicket(config, key) {
   // backend preserves one trust boundary for future credentials and logging.
   const response = await fetch(`${config.backendUrl}/jira/issue/${encodeURIComponent(key)}`, {
     headers: { Accept: "application/json" },
+    credentials: "include",
   });
   if (!response.ok) throw new Error(`Jira error ${response.status}`);
   return response.json();
@@ -100,6 +137,7 @@ export async function checkEndpoint(backendUrl, path, method = "GET") {
     const response = await fetch(`${backendUrl}${path}`, {
       method,
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
     });
     return {
       ok: response.ok,
@@ -121,6 +159,7 @@ export async function sendSlackNotificationRequest(backendUrl, payload) {
   const response = await fetch(`${backendUrl}/notifications/slack`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -133,6 +172,7 @@ export async function testSlackWebhookRequest(backendUrl, payload) {
   const response = await fetch(`${backendUrl}/notifications/slack/test`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -145,6 +185,7 @@ export async function sendZohoCliqNotificationRequest(backendUrl, payload) {
   const response = await fetch(`${backendUrl}/notifications/zoho-cliq`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -157,6 +198,7 @@ export async function testZohoCliqWebhookRequest(backendUrl, payload) {
   const response = await fetch(`${backendUrl}/notifications/zoho-cliq/test`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
