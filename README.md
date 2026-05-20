@@ -1,263 +1,193 @@
 # HailTrace QA
 
-Internal QA tool for the HailTrace team. Testers describe a feature in plain English or paste a Jira ticket, click **Run Test**, and get a structured verdict with recommendations and an execution log.
+Internal QA workspace for the HailTrace team. Testers can paste plain-English scenarios or Jira tickets, run them through the local backend, and review a structured verdict, recommendations, and execution history.
 
-The React UI talks to a local Node backend (`server.js`). All API keys live in the server-side `.env` file — never in the browser.
+This repo is a small full-stack app:
 
-## How it works
+- React + Vite frontend in `src/`
+- Express backend in [server.js](/Users/aaronthomas/Desktop/HailTraceQATool/server.js)
+- File-backed local account store in `data/accounts.json` at runtime
+- Optional integrations for OpenAI, HailTrace, Jira, Slack, Zoho Cliq, and Customer.io
 
-### End-to-end flow
+## What Problem It Solves
 
-When you click **Run Test**, the backend runs a pipeline. What runs depends on which credentials are in `.env` (see [Runtime modes](#runtime-modes)).
+The app gives QA a single internal workspace for:
 
-**Full pipeline** (OpenAI + HailTrace + Jira as needed):
+- turning plain-English requests into a test brief
+- optionally expanding Jira tickets into structured test context
+- executing HailTrace-backed QA when credentials exist
+- summarizing results for faster triage
+- saving history, templates, suites, and exports per user
+
+Without credentials, it still works in demo mode for local UI and workflow development.
+
+## How It Works
+
+At runtime, the backend chooses the best available pipeline based on environment configuration:
+
+1. User enters a plain-English scenario, Jira key, or Jira URL.
+2. The frontend detects Jira-like input and can fetch ticket details through the backend.
+3. `POST /run-test` resolves the input into a test brief.
+4. If OpenAI is configured, the backend uses it to interpret the request and summarize outcomes.
+5. If HailTrace is configured, the backend executes the QA run.
+6. The UI stores user-owned history, templates, suites, and settings in browser `localStorage`.
+
+Runtime behavior by config:
+
+- OpenAI + HailTrace: full interpret -> execute -> summarize path
+- OpenAI only: QA plan and analysis, no live execution
+- HailTrace only: direct execution without LLM planning
+- No external credentials: demo/mock behavior
+
+## Main User Flows
+
+- Sign in with a backend-issued `HttpOnly` session cookie
+- Bootstrap the first account as admin
+- Admin invites users or creates them directly
+- Invited users accept a one-time link and set their own password
+- Users request password-reset links
+- Testers run scenarios, save templates, group tests into suites, and export results
+
+## Security Model
+
+The current design gets several important basics right:
+
+- credentials stay server-side in `.env` or `.env.production`
+- frontend calls the backend with cookie auth; it does not talk directly to Jira or OpenAI
+- passwords are hashed server-side before storage
+- session cookies are signed and `HttpOnly`
+- invite and reset tokens are hashed at rest and time-limited
+- auth, test execution, Jira, and notification paths are rate-limited
+- production readiness checks fail closed on unsafe config
+
+Relevant files:
+
+- [server/security.mjs](/Users/aaronthomas/Desktop/HailTraceQATool/server/security.mjs)
+- [server/tokens.mjs](/Users/aaronthomas/Desktop/HailTraceQATool/server/tokens.mjs)
+- [scripts/check-production-readiness.mjs](/Users/aaronthomas/Desktop/HailTraceQATool/scripts/check-production-readiness.mjs)
+- [tests/security.test.mjs](/Users/aaronthomas/Desktop/HailTraceQATool/tests/security.test.mjs)
+- [tests/auth-flow.test.mjs](/Users/aaronthomas/Desktop/HailTraceQATool/tests/auth-flow.test.mjs)
+
+## Current Constraints
+
+This project is still best treated as a single-instance internal tool.
+
+- Accounts are stored in a local JSON file, not a database.
+- Rate limits are in-memory per Node process.
+- Concurrent writes to `data/accounts.json` are not coordinated across processes.
+- History/templates/suites/settings are stored client-side per user in `localStorage`.
+
+That means this is fine for local development and a small internal deployment, but not yet a horizontally scaled or highly concurrent production system.
+
+## Project Structure
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│  You enter plain English and/or a Jira URL or key (one/line)    │
-└───────────────────────────────┬─────────────────────────────────┘
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  1. Jira (optional)                                             │
-│     If the line is HT-108 or a Jira URL, fetch summary,         │
-│     description, and acceptance criteria from Jira API.         │
-└───────────────────────────────┬─────────────────────────────────┘
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  2. ChatGPT (OpenAI) — interpret                                │
-│     Turn the request into a precise execution brief: what to    │
-│     test, steps, expected outcomes, AC coverage.                │
-└───────────────────────────────┬─────────────────────────────────┘
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  3. HailTrace API — execute                                     │
-│     Run automated QA (API checks, browser/Playwright, etc.).      │
-│     Returns pass / fail / needs manual check.                   │
-└───────────────────────────────┬─────────────────────────────────┘
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  4. ChatGPT — summarize                                         │
-│     Explain results, where code needs work, and next steps.       │
-└───────────────────────────────┬─────────────────────────────────┘
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  UI shows sections + Execution Log + Live API call cards        │
-└─────────────────────────────────────────────────────────────────┘
+HailTraceQATool/
+├── src/
+│   ├── App.jsx                    # App composition root and public auth routes
+│   ├── components/                # Login, invite/reset flows, shell, tabs
+│   ├── hooks/                     # Auth, tests, suites, accounts, export state
+│   └── lib/                       # API client, storage, export helpers, constants
+├── server.js                      # Express API, auth, orchestration, runtime modes
+├── server/
+│   ├── security.mjs               # Cookie auth, hashing, validation, rate limiting
+│   ├── tokens.mjs                 # Invite/reset token generation and verification
+│   ├── email.mjs                  # Customer.io-backed invite/reset delivery
+│   ├── integrations.mjs           # HailTrace, Jira, Slack, Zoho Cliq calls
+│   ├── openai.mjs                 # LLM-guided QA flows
+│   ├── jiraKey.mjs                # Jira URL/key parsing helpers
+│   └── loadEnv.mjs                # Dev/prod env loading
+├── tests/                         # Node test coverage for security and auth flows
+├── scripts/
+│   ├── start-prod.mjs             # Safe local production launcher
+│   ├── check-production-readiness.mjs
+│   ├── internal-publish-checklist.mjs
+│   └── migrate-accounts-to-email.mjs
+├── QUICKSTART.md                  # Fastest path for other devs
+├── .env.example
+└── .env.production.example
 ```
 
-**Important:** ChatGPT does not replace HailTrace execution. It interprets your words and summarizes HailTrace’s results. The **verdict** comes from HailTrace when that integration is live.
+## API Surface
 
-### What you can paste
+Core backend routes:
 
-| Input | Example |
-| ----- | ------- |
-| Plain English | `User can submit a hail damage report and see it on the map` |
-| Jira key | `HT-108` |
-| Browse URL | `https://yourcompany.atlassian.net/browse/HT-108` |
-| Board URL | `…/board?selectedIssue=HT-108` |
+- `GET /health`
+- `GET /health/integrations`
+- `POST /login`
+- `POST /register`
+- `POST /logout`
+- `GET /session`
+- `GET /accounts`
+- `POST /invite`
+- `GET /invite/:token`
+- `POST /accept-invite`
+- `POST /forgot-password`
+- `GET /reset/:token`
+- `POST /reset-password`
+- `POST /run-test`
+- `GET /jira/issue/:key`
+- `POST /notifications/slack`
+- `POST /notifications/zoho-cliq`
 
-Multiple lines = multiple tests run **in order**.
+## Developer Start Here
 
-The UI shows **Jira ticket detected** when a line looks like Jira. Fetched tickets appear with a **Jira** badge and the issue key on the test card.
+Use [QUICKSTART.md](/Users/aaronthomas/Desktop/HailTraceQATool/QUICKSTART.md) for day-one setup.
 
-### What you see after a run
-
-Expand a test with **View**:
-
-| Section | Meaning |
-| ------- | ------- |
-| **WHAT IS BEING TESTED** | Scope (includes `[HT-108]` when from Jira) |
-| **API RESULTS** | Summary of HailTrace / integration calls |
-| **CODE ANALYSIS** | Explanation of the outcome |
-| **ERROR LOCATION** | Where work is needed (files, routes, UI) if applicable |
-| **RECOMMENDATIONS** | Numbered actions — each has a **title** and **description** |
-| **Live API Calls** | Cards for OpenAI, HailTrace, etc. (status, endpoint) |
-| **Execution Log** | Narrative summary, timings, raw HailTrace log |
-| **Verdict** | `PASS`, `FAIL`, or `NEEDS MANUAL CHECK` (badge on the card) |
-
-History, templates, suites, and settings are stored in the browser (`localStorage`). Slack notifications fire from the backend when enabled in settings.
-
-## Security model
-
-- Authentication now uses a signed, `HttpOnly` session cookie issued by the backend.
-- Account creation is admin-only after the first bootstrap account. The first registered user becomes the initial admin.
-- Passwords are stored as salted password hashes on the server, not plaintext.
-- Demo mode is intended for local development. In production, set `ALLOW_DEMO_MODE=false` unless you explicitly want mock responses.
-
-## Runtime modes
-
-Check what is active:
-
-```bash
-curl http://localhost:3001/health
-```
-
-Each integration is `"live"` or `"demo"`:
-
-| Credentials set | Behavior on **Run Test** |
-| --------------- | ------------------------ |
-| OpenAI + HailTrace | Full pipeline (interpret → execute → summarize) |
-| OpenAI only | ChatGPT plan + execution brief; verdict **NEEDS MANUAL CHECK**; no HailTrace run |
-| HailTrace only | Direct HailTrace call (no ChatGPT) |
-| Jira only | Real ticket text when input is a Jira URL/key |
-| None | Demo mode: keyword-based mock verdicts |
-
-Partial config (e.g. only `JIRA_BASE_URL` without email/token) logs a warning at server start and stays on demo for that service.
-
-## Setup
-
-### 1. Install and configure
+Short version:
 
 ```bash
 npm install
 cp .env.example .env
-```
-
-Edit `.env` with your values. Restart the backend whenever you change it.
-
-### 2. Run locally (two terminals)
-
-**Terminal 1 — backend**
-
-```bash
-npm run server
-```
-
-**Terminal 2 — frontend**
-
-```bash
+npm run start:dev
 npm run dev
 ```
 
-Open the Vite URL (usually `http://localhost:5173`). The app expects the backend at `http://localhost:3001` unless you change it in Settings.
+Then open `http://localhost:5173`.
 
-### 3. Production build
+## Environment Model
 
-```bash
-npm run build
-npm run preview
-```
+The backend intentionally separates dev and production config:
 
-Serve `dist/` behind your host; run `server.js` separately with the same `.env`.
+- `.env`: local development defaults
+- `.env.production`: production-only overrides
 
-## Environment variables
+Do not set `NODE_ENV` inside either file. The production launcher sets it for the child process when needed.
 
-Use a single `.env` file as the source of truth for deployment. It is gitignored. Copy from `.env.example`.
+Important variables:
 
-| Variable | Purpose |
-| -------- | ------- |
-| `PORT` | Backend port (default `3001`) |
-| `NODE_ENV` | Set to `production` in deployed environments |
-| `SESSION_SECRET` | Long random secret used to sign session cookies |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated list of allowed frontend origins |
-| `ALLOW_DEMO_MODE` | `true` or `false`; disable mock/demo responses in production |
-| `OPENAI_API_KEY` | ChatGPT — interpret input and summarize results |
-| `OPENAI_MODEL` | Optional model (default `gpt-4o-mini`) |
-| `HAILTRACE_API_BASE_URL` | HailTrace API host |
-| `HAILTRACE_API_KEY` | HailTrace auth |
-| `HAILTRACE_QA_PATH` | Run-test path (default `/qa/run-test`) |
-| `HAILTRACE_AUTH_STYLE` | `bearer` or `api-key` |
-| `JIRA_BASE_URL` | e.g. `https://yourcompany.atlassian.net` |
-| `JIRA_EMAIL` | Atlassian account email |
-| `JIRA_API_TOKEN` | [API token](https://id.atlassian.com/manage-profile/security/api-tokens) |
-| `SLACK_WEBHOOK_URL` | Incoming webhook for pass/fail notifications |
+- `PORT`
+- `SESSION_SECRET`
+- `CORS_ALLOWED_ORIGINS`
+- `ALLOW_DEMO_MODE`
+- `APP_PUBLIC_URL`
+- `OPENAI_API_KEY`
+- `HAILTRACE_API_BASE_URL`
+- `HAILTRACE_API_KEY`
+- `JIRA_BASE_URL`
+- `JIRA_EMAIL`
+- `JIRA_API_TOKEN`
+- `CUSTOMERIO_APP_API_KEY`
+- `CUSTOMERIO_INVITE_TEMPLATE_ID`
+- `CUSTOMERIO_RESET_TEMPLATE_ID`
 
-## Stack
+See [.env.example](/Users/aaronthomas/Desktop/HailTraceQATool/.env.example) and [.env.production.example](/Users/aaronthomas/Desktop/HailTraceQATool/.env.production.example).
 
-- **Frontend:** React 18, Vite, `localStorage`
-- **Backend:** Express (`server.js`), integrations in `server/`
+## Scripts
 
-## Project structure
+- `npm run dev` starts the Vite frontend
+- `npm run start:dev` starts the backend in dev mode
+- `npm run start:prod` runs fail-closed prod checks, then starts the backend in prod mode
+- `npm test` runs the Node test suite
+- `npm run build` builds the frontend
+- `npm run check:prod` validates production-critical config
+- `npm run checklist` prints an internal publish checklist
 
-```text
-HailTraceQATool/
-├── server.js                 # HTTP API, auth, /run-test orchestration
-├── server/
-│   ├── integrations.mjs      # HailTrace API, Jira, Slack
-│   ├── openai.mjs            # ChatGPT plan + summarize
-│   ├── jiraKey.mjs           # Parse Jira URLs/keys
-│   └── loadEnv.mjs
-├── src/
-│   ├── App.jsx               # Shell and tab routing
-│   ├── hooks/                # useTests, useAuth, useSuites, …
-│   ├── components/tabs/      # Tests, History, Settings, …
-│   └── lib/                  # API client, constants, utils
-├── styles.css
-├── .env.example
-└── data/accounts.json        # Local registered users (created at runtime)
-```
+## Review Findings
 
-## API endpoints
+Two important engineering limits are still present:
 
-The frontend calls these on the backend:
+1. [server.js](/Users/aaronthomas/Desktop/HailTraceQATool/server.js:124) and [server.js](/Users/aaronthomas/Desktop/HailTraceQATool/server.js:136) use plain file reads and writes for account state. Concurrent requests or multiple app instances can overwrite each other's changes because there is no file lock, transactional write, or database coordination.
+2. [server/security.mjs](/Users/aaronthomas/Desktop/HailTraceQATool/server/security.mjs:168) keeps rate-limit counters in process memory. That is acceptable for local/internal use, but limits reset on restart and do not protect across multiple instances.
 
-| Method | Path | Purpose |
-| ------ | ---- | ------- |
-| `GET` | `/health` | Service status and live/demo per integration |
-| `GET` | `/session` | Return the authenticated session, if any |
-| `POST` | `/login` | Sign in |
-| `POST` | `/register` | Create account |
-| `POST` | `/logout` | Clear the current session |
-| `GET` | `/accounts` | List users (sanitized) |
-| `DELETE` | `/accounts/:username` | Remove user |
-| `POST` | `/run-test` | Run QA pipeline (`description`, optional `jiraKey`) |
-| `GET` | `/jira/issue/:key` | Fetch ticket for the UI |
-| `POST` | `/notifications/slack` | Send result notification |
-| `POST` | `/notifications/slack/test` | Test webhook |
-
-## Architecture notes
-
-- **`useTests`** — Parses input, loads Jira in the browser, calls `/run-test`, updates cards and history.
-- **`POST /run-test`** — Resolves Jira if needed (`resolveTestInput`), then OpenAI and/or HailTrace per [runtime modes](#runtime-modes).
-- **Demo fallbacks** in `server.js` keep the UI usable without real credentials.
-- **`App.jsx`** is the composition root; tab logic lives in hooks and `src/components/tabs/`.
-
-## Internal publish checklist
-
-Before deploying this internally:
-
-1. Set `NODE_ENV=production`.
-2. Set a strong `SESSION_SECRET`.
-3. Set `CORS_ALLOWED_ORIGINS` to your real internal frontend origin(s), not `*`.
-4. Set `ALLOW_DEMO_MODE=false` unless you intentionally want mock behavior available.
-5. Configure the real integration keys you want enabled.
-6. Create the first admin account during bootstrap, then use that account to create other users.
-
-## Bootstrap and migration notes
-
-- First-run bootstrap: when `data/accounts.json` is empty, the first successful registration becomes the initial `admin`.
-- Existing local accounts that still have plaintext passwords are upgraded automatically to hashed credentials on their next successful login.
-- After bootstrap, only admins can create or remove users.
-- For an internal deployment, keep the `data/` directory private to the host and back it up as operational data.
-
-## Tests
-
-Run the lightweight security-focused test suite with:
-
-```bash
-npm test
-```
-
-Current coverage focuses on:
-
-- password hashing and verification
-- session cookie signing/tamper rejection
-- auth input validation
-- Jira key parsing and formatting behavior
-
-## Deployment helpers
-
-Two helper scripts are available for internal publish workflows:
-
-```bash
-npm run check:prod
-npm run checklist
-```
-
-- `npm run check:prod`
-  Fails fast when production-critical settings are unsafe or missing, including `NODE_ENV`, `SESSION_SECRET`, explicit CORS origins, demo-mode disablement, and missing admin bootstrap state.
-- `npm run checklist`
-  Prints a human-readable internal publish summary: environment flags, configured integrations, build presence, and account bootstrap state.
-
-
-For integration details, see `server/integrations.mjs` and `server/openai.mjs`.
+Those are not reasons to stop using the app locally. They are reasons to document the current deployment envelope honestly and avoid over-claiming production readiness.
