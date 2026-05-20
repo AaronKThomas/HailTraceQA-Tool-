@@ -98,9 +98,10 @@ export function parseCookies(cookieHeader) {
 
 export function createSessionCookie(secret, account, now = Date.now()) {
   const payload = {
-    username: account.username,
+    email: account.email,
     displayName: account.displayName,
     role: account.role || "tester",
+    sessionVersion: Number.isInteger(account.sessionVersion) ? account.sessionVersion : 0,
     issuedAt: now,
     expiresAt: now + DEFAULT_SESSION_TTL_MS,
   };
@@ -121,7 +122,12 @@ export function readSessionCookie(secret, cookieValue) {
 
   try {
     const payload = JSON.parse(fromBase64Url(encodedPayload));
-    if (!payload?.username || !payload?.expiresAt || payload.expiresAt < Date.now()) {
+    if (!payload?.email || !payload?.expiresAt || payload.expiresAt < Date.now()) {
+      return null;
+    }
+    if (!Number.isInteger(payload.sessionVersion)) {
+      // Legacy cookies issued before sessionVersion was added are rejected so
+      // the user is forced through a fresh login that issues a current cookie.
       return null;
     }
     return payload;
@@ -193,12 +199,18 @@ export function requireNonEmptyString(value, field, { max = 5000, min = 1 } = {}
   return normalized;
 }
 
-export function validateUsername(value) {
-  const username = requireNonEmptyString(value, "Username", { min: 3, max: 40 });
-  if (!/^[A-Za-z0-9._-]+$/.test(username)) {
-    throw new Error("Username may only contain letters, numbers, dots, underscores, and hyphens.");
+// Pragmatic email check: enforces the shape (local@domain.tld) without trying
+// to implement RFC 5322. Length cap of 254 follows RFC 5321 §4.5.3.1.1. We
+// always store + look up emails as their lowercase form to make case
+// collisions impossible.
+const EMAIL_REGEX = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+export function validateEmail(value) {
+  const email = requireNonEmptyString(value, "Email", { min: 3, max: 254 });
+  if (!EMAIL_REGEX.test(email)) {
+    throw new Error("Email must look like name@domain.tld.");
   }
-  return username;
+  return email.toLowerCase();
 }
 
 export function validatePassword(value) {

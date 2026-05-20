@@ -79,6 +79,22 @@ const jiraConfigured = Boolean(
   && String(process.env.JIRA_API_TOKEN || "").trim(),
 );
 
+const appPublicUrl = String(process.env.APP_PUBLIC_URL || "").trim();
+if (!appPublicUrl || !/^https:\/\//.test(appPublicUrl)) {
+  fail("APP_PUBLIC_URL is required in production and must be an https:// URL. It is used to build invite and reset links.");
+} else {
+  pass("APP_PUBLIC_URL is set.");
+}
+
+const cioApiKey = String(process.env.CUSTOMERIO_APP_API_KEY || "").trim();
+const cioInvite = String(process.env.CUSTOMERIO_INVITE_TEMPLATE_ID || "").trim();
+const cioReset = String(process.env.CUSTOMERIO_RESET_TEMPLATE_ID || "").trim();
+if (!cioApiKey || cioApiKey.startsWith("replace_") || !cioInvite || cioInvite.startsWith("replace_") || !cioReset || cioReset.startsWith("replace_")) {
+  fail("Customer.io is not fully configured. Set CUSTOMERIO_APP_API_KEY, CUSTOMERIO_INVITE_TEMPLATE_ID, and CUSTOMERIO_RESET_TEMPLATE_ID to real values (not placeholders).");
+} else {
+  pass("Customer.io is configured.");
+}
+
 if (openAiConfigured) pass("OpenAI integration is configured.");
 else warn("OpenAI integration is not configured.");
 
@@ -104,7 +120,7 @@ if (await fileExists(accountsFile)) {
     if (Array.isArray(accounts) && accounts.length > 0) {
       const adminCount = accounts.filter((account) => (account.role || "tester") === "admin").length;
       if (adminCount === 0) {
-        fail("No admin role is present in data/accounts.json. Start the hardened server once to promote the first legacy account before publishing.");
+        fail("No admin role is present in data/accounts.json. Either delete the file and let the first /register call bootstrap a fresh admin, or manually edit one account's `role` field to `\"admin\"`. The server no longer auto-promotes on startup (see H1 in the auth audit).");
       } else {
         pass(`Admin account present (${adminCount}).`);
       }

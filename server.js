@@ -24,10 +24,12 @@ import {
   requireNonEmptyString,
   setSessionCookie,
   validateDisplayName,
+  validateEmail,
   validatePassword,
-  validateUsername,
   verifyPassword,
 } from "./server/security.mjs";
+import { sendInviteEmail, sendResetEmail } from "./server/email.mjs";
+import { createToken, hashToken, isTokenExpired, TOKEN_TTL_MS } from "./server/tokens.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,7 +37,12 @@ const __dirname = path.dirname(__filename);
 await loadEnv(__dirname);
 
 const PORT = Number(process.env.PORT || 3001);
-const DATA_DIR = path.join(__dirname, "data");
+// HAILTRACE_DATA_DIR is intended ONLY for tests. It lets the test harness
+// point at a temp directory so it cannot read or clobber real account data.
+// Production should never set it.
+const DATA_DIR = process.env.HAILTRACE_DATA_DIR
+  ? path.resolve(process.env.HAILTRACE_DATA_DIR)
+  : path.join(__dirname, "data");
 const ACCOUNTS_FILE = path.join(DATA_DIR, "accounts.json");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
@@ -61,6 +68,12 @@ function buildConfig() {
       .map((value) => value.trim())
       .filter(Boolean),
     allowDemoMode: String(process.env.ALLOW_DEMO_MODE || (!IS_PRODUCTION)).toLowerCase() === "true",
+    customerioAppApiKey: process.env.CUSTOMERIO_APP_API_KEY || "",
+    customerioRegion: (process.env.CUSTOMERIO_REGION || "us").toLowerCase(),
+    customerioFromName: process.env.CUSTOMERIO_FROM_NAME || "",
+    customerioInviteTemplateId: process.env.CUSTOMERIO_INVITE_TEMPLATE_ID || "",
+    customerioResetTemplateId: process.env.CUSTOMERIO_RESET_TEMPLATE_ID || "",
+    appPublicUrl: (process.env.APP_PUBLIC_URL || "http://localhost:5173").replace(/\/$/, ""),
   };
 }
 
@@ -73,6 +86,16 @@ const registerRateLimit = createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 2
 const runTestRateLimit = createRateLimiter({ windowMs: 5 * 60 * 1000, limit: 30, keyPrefix: "run-test" });
 const notificationRateLimit = createRateLimiter({ windowMs: 5 * 60 * 1000, limit: 20, keyPrefix: "notify" });
 const jiraRateLimit = createRateLimiter({ windowMs: 5 * 60 * 1000, limit: 60, keyPrefix: "jira" });
+// Invite/reset rate limits. Forgot-password is split into two so we can
+// independently throttle "many resets for one email" (enumeration / harassment
+// of one user) AND "many resets from one IP" (broad credential-bombing). Both
+// limits are silent — the endpoint always returns 200 with the same body to
+// prevent enumeration.
+const inviteRateLimit = createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 20, keyPrefix: "invite" });
+const forgotByEmailRateLimit = createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 5, keyPrefix: "forgot-email" });
+const forgotByIpRateLimit = createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 10, keyPrefix: "forgot-ip" });
+const consumeRateLimit = createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 10, keyPrefix: "consume" });
+const tokenValidateRateLimit = createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 60, keyPrefix: "token-validate" });
 
 app.use(applySecurityHeaders);
 app.use(cors(buildCorsOptions(CONFIG.corsAllowedOrigins)));
@@ -117,39 +140,46 @@ async function writeAccounts(accounts) {
 
 function sanitizeAccount(account) {
   return {
-    username: account.username,
+    email: account.email,
     displayName: account.displayName,
     registeredAt: account.registeredAt,
     role: account.role || "tester",
+    status: account.status || "active",
   };
 }
 
 function normalizeAccount(account) {
   return {
-    username: String(account.username || "").trim(),
+    email: String(account.email || "").trim().toLowerCase(),
     displayName: String(account.displayName || "").trim(),
     registeredAt: account.registeredAt,
     role: account.role === "admin" ? "admin" : "tester",
     passwordHash: account.passwordHash || "",
     passwordSalt: account.passwordSalt || "",
-    password: account.password || "",
+    status: account.status === "pending" ? "pending" : "active",
+    sessionVersion: Number.isInteger(account.sessionVersion) ? account.sessionVersion : 0,
+    pendingToken: account.pendingToken && typeof account.pendingToken === "object" ? account.pendingToken : null,
   };
 }
 
-async function ensureAccountBaseline() {
-  const accounts = (await readAccounts()).map(normalizeAccount);
-  if (!accounts.length) return;
+function findAccountByEmail(accounts, email) {
+  const needle = String(email || "").trim().toLowerCase();
+  if (!needle) return null;
+  return accounts.find((account) => String(account.email || "").toLowerCase() === needle) || null;
+}
 
-  const hasAdmin = accounts.some((account) => account.role === "admin");
-  if (hasAdmin) return;
-
-  const [first, ...rest] = accounts;
-  const promoted = {
-    ...first,
-    role: "admin",
-  };
-  await writeAccounts([promoted, ...rest]);
-  console.warn(`[auth] Promoted ${promoted.username} to admin to recover legacy account data with no admin role.`);
+async function assertAccountSchema() {
+  const accounts = await readAccounts();
+  if (accounts.length === 0) return;
+  const offenders = accounts.filter((account) => !account || typeof account !== "object" || !account.email);
+  if (offenders.length > 0) {
+    console.error(
+      "[startup] data/accounts.json contains accounts without an `email` field. "
+      + "Run: node scripts/migrate-accounts-to-email.mjs --map \"<oldUsername>=<email>\" "
+      + "and restart. Refusing to start.",
+    );
+    process.exit(1);
+  }
 }
 
 function hasRealJiraConfig() {
@@ -265,7 +295,7 @@ async function resolveTestInput(description, jiraKey) {
 
 function applyRateLimit(req, res, limiter, scope) {
   const ip = getClientIp(req);
-  const key = req.user ? `${req.user.username}:${ip}` : ip;
+  const key = req.user ? `${req.user.email}:${ip}` : ip;
   const result = limiter(key);
   if (result.ok) return true;
   res.setHeader("Retry-After", String(Math.ceil((result.retryAfterMs || 1000) / 1000)));
@@ -273,16 +303,51 @@ function applyRateLimit(req, res, limiter, scope) {
   return false;
 }
 
-function attachSession(req, _res, next) {
+async function attachSession(req, _res, next) {
   req.cookies = parseCookies(req.headers.cookie || "");
   const sessionValue = req.cookies[getSessionCookieName()];
   req.session = hasSessionSecret() ? readSessionCookie(CONFIG.sessionSecret, sessionValue) : null;
-  req.user = req.session || null;
+  req.user = null;
+
+  if (!req.session?.email) {
+    next();
+    return;
+  }
+
+  // Re-resolve the account on every request so that role changes, status
+  // changes, and sessionVersion bumps take effect immediately. This is the
+  // mechanism that closes the "demoted admin keeps admin power" window AND
+  // gives password-reset/invite flows the ability to revoke all live
+  // sessions for a user by incrementing sessionVersion.
+  try {
+    const accounts = (await readAccounts()).map(normalizeAccount);
+    const account = findAccountByEmail(accounts, req.session.email);
+    if (!account) {
+      next();
+      return;
+    }
+    if (account.status !== "active") {
+      next();
+      return;
+    }
+    if (account.sessionVersion !== req.session.sessionVersion) {
+      next();
+      return;
+    }
+    req.user = {
+      email: account.email,
+      displayName: account.displayName,
+      role: account.role,
+      sessionVersion: account.sessionVersion,
+    };
+  } catch (error) {
+    console.warn(`[auth] Failed to resolve session account: ${error.message}`);
+  }
   next();
 }
 
 function requireAuth(req, res, next) {
-  if (!req.user?.username) {
+  if (!req.user?.email) {
     return res.status(401).json({ error: "Authentication required." });
   }
   return next();
@@ -568,42 +633,32 @@ app.get("/health/integrations", async (_req, res) => {
 app.post("/login", async (req, res) => {
   if (!applyRateLimit(req, res, authRateLimit, "login")) return undefined;
   try {
-    const { username, password } = req.body || {};
-    if (!username || !password) {
-      return res.status(400).json({ error: "Username and password are required." });
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required." });
     }
 
-    const usernameValue = validateUsername(username);
+    const emailValue = validateEmail(email);
     const passwordValue = String(password);
     const accounts = (await readAccounts()).map(normalizeAccount);
-    const match = accounts.find(
-      (account) =>
-        account.username.toLowerCase() === usernameValue.toLowerCase(),
-    );
+    const match = findAccountByEmail(accounts, emailValue);
 
+    // Authentication outcome is computed without revealing which case failed.
+    // The generic 401 response handles "no account", "wrong password",
+    // "pending account", and "corrupt record" with the same body so callers
+    // cannot enumerate accounts by response shape.
     let authenticated = false;
-    let upgradedAccount = null;
-    if (match) {
-      if (match.passwordHash && match.passwordSalt) {
-        authenticated = await verifyPassword(passwordValue, match);
-      } else if (match.password && match.password === passwordValue) {
-        authenticated = true;
-        const passwordData = await hashPassword(passwordValue);
-        upgradedAccount = { ...match, ...passwordData, password: "" };
-      }
+    if (match && match.status === "active" && match.passwordHash && match.passwordSalt) {
+      authenticated = await verifyPassword(passwordValue, match);
     }
 
-    if (!authenticated || !match) {
-      return res.status(401).json({ error: "Incorrect username or password." });
-    }
-
-    if (upgradedAccount) {
-      await writeAccounts(accounts.map((account) => account.username === upgradedAccount.username ? upgradedAccount : account));
+    if (!authenticated) {
+      return res.status(401).json({ error: "Incorrect email or password." });
     }
 
     ensureSessionSecret();
-    setSessionCookie(res, CONFIG.sessionSecret, upgradedAccount || match, isSecureRequest(req));
-    return res.json({ account: sanitizeAccount(upgradedAccount || match) });
+    setSessionCookie(res, CONFIG.sessionSecret, match, isSecureRequest(req));
+    return res.json({ account: sanitizeAccount(match) });
   } catch (error) {
     return res.status(400).json({ error: error.message || "Login failed." });
   }
@@ -612,19 +667,19 @@ app.post("/login", async (req, res) => {
 app.post("/register", async (req, res) => {
   if (!applyRateLimit(req, res, registerRateLimit, "registration")) return undefined;
   try {
-    const { username, displayName, password } = req.body || {};
-    if (!username || !displayName || !password) {
-      return res.status(400).json({ error: "Username, display name, and password are required." });
+    const { email, displayName, password } = req.body || {};
+    if (!email || !displayName || !password) {
+      return res.status(400).json({ error: "Email, display name, and password are required." });
     }
 
-    const usernameValue = validateUsername(username);
+    const emailValue = validateEmail(email);
     const displayNameValue = validateDisplayName(displayName);
     const passwordValue = validatePassword(password);
     const accounts = (await readAccounts()).map(normalizeAccount);
     const isBootstrap = accounts.length === 0;
 
     if (!isBootstrap) {
-      if (!req.user?.username) {
+      if (!req.user?.email) {
         return res.status(401).json({ error: "An authenticated admin must create new users." });
       }
       if (req.user.role !== "admin") {
@@ -632,15 +687,18 @@ app.post("/register", async (req, res) => {
       }
     }
 
-    if (accounts.some((account) => account.username.toLowerCase() === usernameValue.toLowerCase())) {
-      return res.status(409).json({ error: "Username already taken." });
+    if (findAccountByEmail(accounts, emailValue)) {
+      return res.status(409).json({ error: "Email already registered." });
     }
 
     const passwordData = await hashPassword(passwordValue);
     const account = {
-      username: usernameValue,
+      email: emailValue,
       displayName: displayNameValue,
       role: isBootstrap ? "admin" : "tester",
+      status: "active",
+      sessionVersion: 0,
+      pendingToken: null,
       ...passwordData,
       registeredAt: new Date().toISOString(),
     };
@@ -663,13 +721,13 @@ app.post("/logout", requireAuth, (req, res) => {
 });
 
 app.get("/session", (req, res) => {
-  if (!req.user?.username) {
+  if (!req.user?.email) {
     return res.json({ authenticated: false });
   }
   return res.json({
     authenticated: true,
     account: {
-      username: req.user.username,
+      email: req.user.email,
       displayName: req.user.displayName,
       role: req.user.role || "tester",
     },
@@ -677,26 +735,285 @@ app.get("/session", (req, res) => {
 });
 
 app.get("/accounts", requireAuth, requireAdmin, async (_req, res) => {
-  const accounts = await readAccounts();
+  const accounts = (await readAccounts()).map(normalizeAccount);
   res.json(accounts.map(sanitizeAccount));
 });
 
-app.delete("/accounts/:username", requireAuth, requireAdmin, async (req, res) => {
-  const username = String(req.params.username || "").toLowerCase();
-  const accounts = await readAccounts();
-  const target = accounts.find((account) => account.username.toLowerCase() === username);
-  if (target?.role === "admin") {
-    const adminCount = accounts.filter((account) => (account.role || "tester") === "admin").length;
+// ---------------------------------------------------------------------------
+// Invite + password-reset flows
+//
+// Security invariants enforced below:
+//  * Tokens are 32 random bytes, sha256-hashed at rest, single-use, time-
+//    limited, and verified with timing-safe comparison (see server/tokens.mjs).
+//  * /forgot-password always returns 200 with the same body regardless of
+//    whether the email exists, the rate limit was hit, or the input was
+//    invalid. No user enumeration via this endpoint.
+//  * Successful password change ALWAYS bumps sessionVersion, which invalidates
+//    every existing cookie for that account on the next request (see
+//    attachSession). This is the M4 fix from the auth audit.
+//  * /invite is fail-closed: the persisted change only lands on disk after
+//    Customer.io has accepted the message. A failing email cannot create an
+//    orphan account whose owner never receives a link.
+//  * The raw token only ever appears in the email URL and in memory during
+//    request processing. data/accounts.json stores the sha256 hash.
+// ---------------------------------------------------------------------------
+
+function findAccountByTokenHash(accounts, tokenHash, expectedPurpose) {
+  if (!tokenHash) return null;
+  return accounts.find((account) => {
+    const record = account.pendingToken;
+    if (!record || record.hash !== tokenHash) return false;
+    if (record.purpose !== expectedPurpose) return false;
+    if (isTokenExpired(record)) return false;
+    return true;
+  }) || null;
+}
+
+function buildAcceptInviteUrl(rawToken) {
+  return `${CONFIG.appPublicUrl}/accept-invite?token=${encodeURIComponent(rawToken)}`;
+}
+
+function buildResetUrl(rawToken) {
+  return `${CONFIG.appPublicUrl}/reset-password?token=${encodeURIComponent(rawToken)}`;
+}
+
+app.post("/invite", requireAuth, requireAdmin, async (req, res) => {
+  if (!applyRateLimit(req, res, inviteRateLimit, "invitation")) return undefined;
+  try {
+    const { email, displayName } = req.body || {};
+    if (!email || !displayName) {
+      return res.status(400).json({ error: "Email and display name are required." });
+    }
+    const emailValue = validateEmail(email);
+    const displayNameValue = validateDisplayName(displayName);
+
+    const accounts = (await readAccounts()).map(normalizeAccount);
+    const existing = findAccountByEmail(accounts, emailValue);
+    if (existing && existing.status === "active") {
+      return res.status(409).json({ error: "An active account already exists for this email." });
+    }
+
+    const { raw: rawToken, record } = createToken("invite");
+    const expiresInHours = Math.round(TOKEN_TTL_MS.invite / 3_600_000);
+    const now = new Date().toISOString();
+
+    const nextAccount = existing
+      ? {
+        ...existing,
+        displayName: displayNameValue,
+        pendingToken: record,
+      }
+      : {
+        email: emailValue,
+        displayName: displayNameValue,
+        role: "tester",
+        status: "pending",
+        sessionVersion: 0,
+        pendingToken: record,
+        passwordHash: "",
+        passwordSalt: "",
+        registeredAt: now,
+      };
+
+    // Send email FIRST so a delivery failure prevents any account from being
+    // persisted. The raw token only exists in the email URL and in memory.
+    try {
+      await sendInviteEmail(CONFIG, {
+        to: emailValue,
+        displayName: displayNameValue,
+        inviteUrl: buildAcceptInviteUrl(rawToken),
+        expiresInHours,
+      });
+    } catch (error) {
+      console.warn(`[invite] Could not send invite to ${emailValue}: ${error.message}`);
+      return res.status(502).json({ error: "Could not send invite email. Please try again." });
+    }
+
+    const nextAccounts = existing
+      ? accounts.map((account) => account.email === existing.email ? nextAccount : account)
+      : [...accounts, nextAccount];
+    await writeAccounts(nextAccounts);
+
+    return res.status(201).json({ account: sanitizeAccount(nextAccount) });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Invite failed." });
+  }
+});
+
+app.get("/invite/:token", async (req, res) => {
+  if (!applyRateLimit(req, res, tokenValidateRateLimit, "token validation")) return undefined;
+  const rawToken = String(req.params.token || "");
+  const tokenHash = rawToken ? hashToken(rawToken) : null;
+  const accounts = (await readAccounts()).map(normalizeAccount);
+  const match = findAccountByTokenHash(accounts, tokenHash, "invite");
+  if (!match) return res.json({ valid: false });
+  return res.json({
+    valid: true,
+    email: match.email,
+    displayName: match.displayName,
+    expiresAt: match.pendingToken.expiresAt,
+  });
+});
+
+app.post("/accept-invite", async (req, res) => {
+  if (!applyRateLimit(req, res, consumeRateLimit, "invite acceptance")) return undefined;
+  try {
+    const { token, password, displayName } = req.body || {};
+    if (!token || !password) {
+      return res.status(400).json({ error: "Token and password are required." });
+    }
+    const passwordValue = validatePassword(password);
+    const trimmedDisplayName = typeof displayName === "string" && displayName.trim()
+      ? validateDisplayName(displayName)
+      : null;
+
+    const tokenHash = hashToken(String(token));
+    const accounts = (await readAccounts()).map(normalizeAccount);
+    const match = findAccountByTokenHash(accounts, tokenHash, "invite");
+    if (!match) {
+      return res.status(400).json({ error: "This invite link is invalid or has expired." });
+    }
+
+    const passwordData = await hashPassword(passwordValue);
+    const updated = {
+      ...match,
+      ...passwordData,
+      status: "active",
+      pendingToken: null,
+      displayName: trimmedDisplayName || match.displayName,
+      sessionVersion: (Number.isInteger(match.sessionVersion) ? match.sessionVersion : 0) + 1,
+    };
+
+    await writeAccounts(accounts.map((account) => account.email === match.email ? updated : account));
+    ensureSessionSecret();
+    setSessionCookie(res, CONFIG.sessionSecret, updated, isSecureRequest(req));
+    return res.status(200).json({ account: sanitizeAccount(updated) });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Could not accept invite." });
+  }
+});
+
+app.post("/forgot-password", async (req, res) => {
+  // This endpoint is intentionally chatty in successful logs and silent in
+  // its HTTP response. It ALWAYS returns 200 with the same body so attackers
+  // can't enumerate accounts or rate-limit state from the outside.
+  const respondOk = () => res.json({ ok: true });
+
+  const ip = getClientIp(req);
+  if (!forgotByIpRateLimit(ip).ok) {
+    console.warn(`[forgot-password] IP rate limit hit for ${ip}`);
+    return respondOk();
+  }
+
+  let emailValue = "";
+  try {
+    emailValue = validateEmail(String(req.body?.email || ""));
+  } catch {
+    return respondOk();
+  }
+
+  if (!forgotByEmailRateLimit(emailValue).ok) {
+    console.warn(`[forgot-password] Email rate limit hit for ${emailValue}`);
+    return respondOk();
+  }
+
+  const accounts = (await readAccounts()).map(normalizeAccount);
+  const match = findAccountByEmail(accounts, emailValue);
+  if (!match || match.status !== "active") {
+    return respondOk();
+  }
+
+  const { raw: rawToken, record } = createToken("reset");
+  const updated = { ...match, pendingToken: record };
+  await writeAccounts(accounts.map((account) => account.email === match.email ? updated : account));
+
+  const expiresInHours = Math.max(1, Math.round(TOKEN_TTL_MS.reset / 3_600_000));
+  try {
+    await sendResetEmail(CONFIG, {
+      to: match.email,
+      displayName: match.displayName,
+      resetUrl: buildResetUrl(rawToken),
+      expiresInHours,
+    });
+  } catch (error) {
+    // We intentionally do not surface delivery failures here. The user must
+    // not learn whether their email exists. They will simply not receive a
+    // message. Operators see the failure in server logs.
+    console.warn(`[forgot-password] Send failed for ${match.email}: ${error.message}`);
+  }
+  return respondOk();
+});
+
+app.get("/reset/:token", async (req, res) => {
+  if (!applyRateLimit(req, res, tokenValidateRateLimit, "token validation")) return undefined;
+  const rawToken = String(req.params.token || "");
+  const tokenHash = rawToken ? hashToken(rawToken) : null;
+  const accounts = (await readAccounts()).map(normalizeAccount);
+  const match = findAccountByTokenHash(accounts, tokenHash, "reset");
+  if (!match) return res.json({ valid: false });
+  return res.json({
+    valid: true,
+    email: match.email,
+    displayName: match.displayName,
+    expiresAt: match.pendingToken.expiresAt,
+  });
+});
+
+app.post("/reset-password", async (req, res) => {
+  if (!applyRateLimit(req, res, consumeRateLimit, "password reset")) return undefined;
+  try {
+    const { token, password } = req.body || {};
+    if (!token || !password) {
+      return res.status(400).json({ error: "Token and password are required." });
+    }
+    const passwordValue = validatePassword(password);
+
+    const tokenHash = hashToken(String(token));
+    const accounts = (await readAccounts()).map(normalizeAccount);
+    const match = findAccountByTokenHash(accounts, tokenHash, "reset");
+    if (!match) {
+      return res.status(400).json({ error: "This reset link is invalid or has expired." });
+    }
+
+    const passwordData = await hashPassword(passwordValue);
+    const updated = {
+      ...match,
+      ...passwordData,
+      pendingToken: null,
+      // Bumping sessionVersion invalidates every existing cookie for this
+      // account on the next request, including any session a hijacker may
+      // have. The user must log in fresh with their new password.
+      sessionVersion: (Number.isInteger(match.sessionVersion) ? match.sessionVersion : 0) + 1,
+    };
+
+    await writeAccounts(accounts.map((account) => account.email === match.email ? updated : account));
+    // Do NOT issue a session cookie. Reset is not the same as login; the user
+    // must explicitly authenticate with their new credentials.
+    return res.status(204).send();
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Could not reset password." });
+  }
+});
+
+app.delete("/accounts/:email", requireAuth, requireAdmin, async (req, res) => {
+  let emailValue;
+  try {
+    emailValue = validateEmail(decodeURIComponent(String(req.params.email || "")));
+  } catch {
+    return res.status(400).json({ error: "Invalid email." });
+  }
+  const accounts = (await readAccounts()).map(normalizeAccount);
+  const target = findAccountByEmail(accounts, emailValue);
+  if (!target) {
+    return res.status(404).json({ error: "Account not found." });
+  }
+  if (target.role === "admin") {
+    const adminCount = accounts.filter((account) => account.role === "admin").length;
     if (adminCount <= 1) {
       return res.status(400).json({ error: "Cannot remove the last admin account." });
     }
   }
-  const nextAccounts = accounts.filter((account) => account.username.toLowerCase() !== username);
-
-  if (nextAccounts.length === accounts.length) {
-    return res.status(404).json({ error: "Account not found." });
-  }
-
+  const nextAccounts = accounts.filter((account) => account.email !== target.email);
   await writeAccounts(nextAccounts);
   return res.status(204).send();
 });
@@ -899,20 +1216,27 @@ app.use((error, _req, res, _next) => {
   return res.status(500).json({ error: "Internal server error." });
 });
 
-await ensureAccountBaseline();
+await assertAccountSchema();
 
-app.listen(PORT, () => {
-  validateConfig();
-  if (IS_PRODUCTION && !hasSessionSecret()) {
-    console.error("SESSION_SECRET is required in production.");
-    process.exit(1);
-  }
-  console.log(`HailTrace QA backend listening on http://localhost:${PORT}`);
-  console.log(`Mode: ${getRuntimeMode()}`);
-  console.log(`  HailTrace QA: ${hasRealHailTraceConfig() ? "live" : "demo"}`);
-  console.log(`  Jira:         ${hasRealJiraConfig() ? "live" : "demo"}`);
-  console.log(`  Slack:        ${hasRealSlackConfig() ? "live" : "demo"}`);
-  console.log(`  Zoho Cliq:    ${hasRealZohoCliqConfig() ? "live" : "demo"}`);
-  console.log(`  OpenAI:       ${hasOpenAiConfig() ? "live" : "demo"}`);
-  console.log(`  Demo mode:    ${getDemoAllowed() ? "enabled" : "disabled"}`);
-});
+// Allow tests to import server.js without the side-effect of binding a port
+// (set HAILTRACE_TEST_MODE=1 in test runners; see tests/auth-flow.test.mjs).
+// In normal runtime nothing changes — the server still binds PORT.
+export { app };
+
+if (!process.env.HAILTRACE_TEST_MODE) {
+  app.listen(PORT, () => {
+    validateConfig();
+    if (IS_PRODUCTION && !hasSessionSecret()) {
+      console.error("SESSION_SECRET is required in production.");
+      process.exit(1);
+    }
+    console.log(`HailTrace QA backend listening on http://localhost:${PORT}`);
+    console.log(`Mode: ${getRuntimeMode()}`);
+    console.log(`  HailTrace QA: ${hasRealHailTraceConfig() ? "live" : "demo"}`);
+    console.log(`  Jira:         ${hasRealJiraConfig() ? "live" : "demo"}`);
+    console.log(`  Slack:        ${hasRealSlackConfig() ? "live" : "demo"}`);
+    console.log(`  Zoho Cliq:    ${hasRealZohoCliqConfig() ? "live" : "demo"}`);
+    console.log(`  OpenAI:       ${hasOpenAiConfig() ? "live" : "demo"}`);
+    console.log(`  Demo mode:    ${getDemoAllowed() ? "enabled" : "disabled"}`);
+  });
+}

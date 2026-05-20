@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 export default function LoginScreen({ onLogin, onRegister }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({
-    username: "",
+    email: "",
     displayName: "",
     password: "",
     confirm: "",
@@ -12,8 +12,8 @@ export default function LoginScreen({ onLogin, onRegister }) {
   const [submitting, setSubmitting] = useState(false);
 
   const isValid = useMemo(() => {
-    if (mode === "login") return Boolean(form.username.trim() && form.password);
-    return Boolean(form.username.trim() && form.displayName.trim() && form.password && form.confirm);
+    if (mode === "login") return Boolean(form.email.trim() && form.password);
+    return Boolean(form.email.trim() && form.displayName.trim() && form.password && form.confirm);
   }, [form, mode]);
 
   async function handleSubmit() {
@@ -23,12 +23,12 @@ export default function LoginScreen({ onLogin, onRegister }) {
 
     try {
       if (mode === "login") {
-        await onLogin(form.username.trim(), form.password);
+        await onLogin(form.email.trim().toLowerCase(), form.password);
       } else {
         if (form.password !== form.confirm) throw new Error("Passwords don't match.");
         if (form.password.length < 12) throw new Error("Password must be at least 12 characters.");
         await onRegister({
-          username: form.username.trim(),
+          email: form.email.trim().toLowerCase(),
           displayName: form.displayName.trim(),
           password: form.password,
         });
@@ -62,8 +62,8 @@ export default function LoginScreen({ onLogin, onRegister }) {
         </div>
         <div className="login-fields">
           <div className="field-group">
-            <label>Username</label>
-            <input value={form.username} onChange={(event) => updateField("username", event.target.value)} placeholder="yourname" onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
+            <label>Email</label>
+            <input type="email" autoComplete="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} placeholder="you@hailtrace.com" onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
           </div>
           {mode === "register" && (
             <div className="field-group">
@@ -86,6 +86,11 @@ export default function LoginScreen({ onLogin, onRegister }) {
         <button className="login-btn" disabled={!isValid || submitting} onClick={handleSubmit}>
           {submitting ? (mode === "login" ? "Signing in…" : "Creating account…") : (mode === "login" ? "Sign In" : "Create Account")}
         </button>
+        {mode === "login" ? (
+          <div className="login-footer" style={{ marginTop: 8 }}>
+            <a href="/forgot-password">Forgot your password?</a>
+          </div>
+        ) : null}
         <div className="login-footer">
           {mode === "login" ? "Don't have an account?" : "Already have an account?"}{" "}
           <button onClick={() => setMode(mode === "login" ? "register" : "login")}>

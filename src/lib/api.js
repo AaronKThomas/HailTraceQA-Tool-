@@ -33,15 +33,15 @@ export async function fetchIntegrationsHealth(backendUrl) {
   }
 }
 
-export async function loginRequest(backendUrl, username, password) {
+export async function loginRequest(backendUrl, email, password) {
   const response = await fetch(`${backendUrl}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ email, password }),
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Incorrect username or password.");
+  if (!response.ok) throw new Error(data.error || "Incorrect email or password.");
   return data.account;
 }
 
@@ -92,19 +92,92 @@ export async function fetchAllAccounts(backendUrl) {
   }
 }
 
-export async function fetchRegisteredAccount(backendUrl, username) {
+export async function fetchRegisteredAccount(backendUrl, email) {
   const accounts = await fetchAllAccounts(backendUrl);
-  return accounts.find((account) => account.username?.toLowerCase() === username.toLowerCase()) || null;
+  const needle = String(email || "").toLowerCase();
+  return accounts.find((account) => account.email?.toLowerCase() === needle) || null;
 }
 
-export async function removeAccount(backendUrl, username) {
-  const response = await fetch(`${backendUrl}/accounts/${encodeURIComponent(username)}`, {
+export async function removeAccount(backendUrl, email) {
+  const response = await fetch(`${backendUrl}/accounts/${encodeURIComponent(email)}`, {
     method: "DELETE",
     credentials: "include",
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || "Failed.");
+  }
+}
+
+export async function inviteUserRequest(backendUrl, { email, displayName }) {
+  const response = await fetch(`${backendUrl}/invite`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ email, displayName }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Could not send invite.");
+  return data.account;
+}
+
+export async function validateInviteToken(backendUrl, token) {
+  try {
+    const response = await fetch(`${backendUrl}/invite/${encodeURIComponent(token)}`, {
+      credentials: "include",
+    });
+    if (!response.ok) return { valid: false };
+    return await response.json();
+  } catch {
+    return { valid: false };
+  }
+}
+
+export async function acceptInviteRequest(backendUrl, { token, password, displayName }) {
+  const response = await fetch(`${backendUrl}/accept-invite`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ token, password, displayName }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Could not accept invite.");
+  return data.account;
+}
+
+export async function forgotPasswordRequest(backendUrl, email) {
+  // The server always returns 200 regardless of whether the email exists.
+  // We mirror that here so the UI never reveals account existence.
+  await fetch(`${backendUrl}/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function validateResetToken(backendUrl, token) {
+  try {
+    const response = await fetch(`${backendUrl}/reset/${encodeURIComponent(token)}`, {
+      credentials: "include",
+    });
+    if (!response.ok) return { valid: false };
+    return await response.json();
+  } catch {
+    return { valid: false };
+  }
+}
+
+export async function resetPasswordRequest(backendUrl, { token, password }) {
+  const response = await fetch(`${backendUrl}/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ token, password }),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || "Could not reset password.");
   }
 }
 

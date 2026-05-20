@@ -3,8 +3,8 @@ import { fetchSession, loginRequest, logoutRequest, registerRequest } from "../l
 import { defaultSettings } from "../lib/constants";
 import { readJson } from "../lib/storage";
 
-function getUserKey(prefix, username) {
-  return `${prefix}:${username}`;
+function getUserKey(prefix, email) {
+  return `${prefix}:${String(email || "").toLowerCase()}`;
 }
 
 export function useAuth() {
@@ -17,15 +17,15 @@ export function useAuth() {
   const [testDraft, setTestDraft] = useState("");
 
   const hydrateUser = useCallback((account) => {
-    const savedSettings = readJson(getUserKey("settings", account.username), {}) || {};
+    const savedSettings = readJson(getUserKey("settings", account.email), {}) || {};
 
     setCurrentUser(account);
-    setHistory((readJson(getUserKey("history", account.username), []) || []).map((entry) => ({
+    setHistory((readJson(getUserKey("history", account.email), []) || []).map((entry) => ({
       ...entry,
       timestamp: new Date(entry.timestamp),
     })));
-    setTemplates(readJson(getUserKey("templates", account.username), []) || []);
-    setSuites(readJson(getUserKey("suites", account.username), []) || []);
+    setTemplates(readJson(getUserKey("templates", account.email), []) || []);
+    setSuites(readJson(getUserKey("suites", account.email), []) || []);
     setSettings({
       ...defaultSettings,
       ...savedSettings,
@@ -34,8 +34,8 @@ export function useAuth() {
     setTestDraft("");
   }, []);
 
-  const handleLogin = useCallback(async (username, password) => {
-    const account = await loginRequest(settings.backendUrl, username, password);
+  const handleLogin = useCallback(async (email, password) => {
+    const account = await loginRequest(settings.backendUrl, email, password);
     hydrateUser(account);
   }, [hydrateUser, settings.backendUrl]);
 
@@ -66,7 +66,7 @@ export function useAuth() {
 
     fetchSession(savedBackendUrl).then((account) => {
       if (!active) return;
-      if (account?.username) {
+      if (account?.email) {
         hydrateUser(account);
         setSettings((current) => ({
           ...current,

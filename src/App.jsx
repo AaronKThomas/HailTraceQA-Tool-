@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import AcceptInvite from "./components/AcceptInvite";
 import AppShell from "./components/AppShell";
+import ForgotPassword from "./components/ForgotPassword";
 import LoginScreen from "./components/LoginScreen";
+import ResetPassword from "./components/ResetPassword";
 import Toast from "./components/Toast";
 import DashboardTab from "./components/tabs/DashboardTab";
 import HistoryTab from "./components/tabs/HistoryTab";
@@ -19,11 +22,25 @@ import { useSuites } from "./hooks/useSuites";
 import { useTests } from "./hooks/useTests";
 import { useToast } from "./hooks/useToast";
 
-function getUserKey(prefix, username) {
-  return `${prefix}:${username}`;
+function getUserKey(prefix, email) {
+  return `${prefix}:${String(email || "").toLowerCase()}`;
 }
 
+// Lightweight pathname routing for the three public auth-flow pages. We
+// intentionally avoid pulling in react-router for a 3-route surface — these
+// pages are full-screen, do not share state with the main app, and benefit
+// from a hard page reload between auth flow and authenticated app. The
+// wrapper keeps the hook order in AuthenticatedApp stable per React's rules
+// of hooks (the auth pages never invoke AuthenticatedApp's hook chain).
 export default function App() {
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+  if (pathname.startsWith("/accept-invite")) return <AcceptInvite />;
+  if (pathname.startsWith("/forgot-password")) return <ForgotPassword />;
+  if (pathname.startsWith("/reset-password")) return <ResetPassword />;
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const [activeTab, setActiveTab] = useState("tests");
   const [historyFilter, setHistoryFilter] = useState("all");
   const [historySearch, setHistorySearch] = useState("");
@@ -78,6 +95,7 @@ export default function App() {
   const {
     accounts,
     addUser,
+    inviteUser,
     deleteUser,
   } = useAccounts(settings.backendUrl, currentUser);
 
@@ -130,7 +148,7 @@ export default function App() {
       ["suites", suites],
       ["settings", settings],
     ].forEach(([prefix, value]) => {
-      writeJson(getUserKey(prefix, currentUser.username), value);
+      writeJson(getUserKey(prefix, currentUser.email), value);
     });
 
     return undefined;
@@ -286,6 +304,7 @@ export default function App() {
             currentUser={currentUser}
             accounts={accounts}
             onAddUser={addUser}
+            onInviteUser={inviteUser}
             onRemoveUser={deleteUser}
             onLogout={handleLogout}
             onTestSlack={handleTestSlack}
@@ -330,6 +349,7 @@ export default function App() {
     rerunTest,
     testDraft,
     addUser,
+    inviteUser,
     deleteUser,
     addSuiteTest,
     removeSuiteTest,

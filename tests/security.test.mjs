@@ -6,8 +6,8 @@ import {
   hashPassword,
   readSessionCookie,
   validateDisplayName,
+  validateEmail,
   validatePassword,
-  validateUsername,
   verifyPassword,
 } from "../server/security.mjs";
 import {
@@ -15,6 +15,7 @@ import {
   parseJiraKey,
   shouldLoadJiraTicket,
 } from "../server/jiraKey.mjs";
+import { createToken, hashToken, verifyToken } from "../server/tokens.mjs";
 
 test("hashPassword and verifyPassword round-trip correctly", async () => {
   const password = "CorrectHorseBatteryStaple!";
@@ -26,18 +27,20 @@ test("hashPassword and verifyPassword round-trip correctly", async () => {
   assert.equal(await verifyPassword("wrong-password", hashed), false);
 });
 
-test("session cookie signing rejects tampered values", () => {
+test("session cookie signing rejects tampered values and embeds sessionVersion", () => {
   const secret = "test-secret";
   const account = {
-    username: "alice",
+    email: "alice@example.com",
     displayName: "Alice",
     role: "admin",
+    sessionVersion: 3,
   };
 
   const cookie = createSessionCookie(secret, account, Date.now());
   const session = readSessionCookie(secret, cookie);
-  assert.equal(session.username, "alice");
+  assert.equal(session.email, "alice@example.com");
   assert.equal(session.role, "admin");
+  assert.equal(session.sessionVersion, 3);
 
   const [payload, signature] = cookie.split(".");
   const tamperedPayload = `${payload}x.${signature}`;
@@ -45,13 +48,29 @@ test("session cookie signing rejects tampered values", () => {
 });
 
 test("input validators accept safe values and reject weak ones", () => {
-  assert.equal(validateUsername("qa-user_1"), "qa-user_1");
+  assert.equal(validateEmail("Aaron.Thomas@HailTrace.com"), "aaron.thomas@hailtrace.com");
   assert.equal(validateDisplayName("QA Team"), "QA Team");
   assert.equal(validatePassword("LongEnoughPass1!"), "LongEnoughPass1!");
 
-  assert.throws(() => validateUsername("bad user"), /Username may only contain/);
+  assert.throws(() => validateEmail("not-an-email"), /Email must look like/);
+  assert.throws(() => validateEmail("missing@tld"), /Email must look like/);
   assert.throws(() => validatePassword("short"), /Password must be between 12 and 128 characters/);
   assert.throws(() => validateDisplayName(" "), /Display name must be between/);
+});
+
+test("token creation and verification: happy path, wrong purpose, expired, tamper", () => {
+  const { raw, record } = createToken("invite");
+  assert.equal(record.purpose, "invite");
+  assert.equal(record.hash, hashToken(raw));
+  assert.equal(verifyToken(raw, record, "invite"), true);
+  assert.equal(verifyToken(raw, record, "reset"), false);
+  assert.equal(verifyToken("not-the-right-token", record, "invite"), false);
+
+  const expired = { ...record, expiresAt: Date.now() - 1 };
+  assert.equal(verifyToken(raw, expired, "invite"), false);
+
+  const tamperedRecord = { ...record, hash: record.hash.slice(0, -2) + "00" };
+  assert.equal(verifyToken(raw, tamperedRecord, "invite"), false);
 });
 
 test("jira parsing supports bare keys and common Atlassian URLs", () => {

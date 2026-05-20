@@ -45,6 +45,8 @@ console.log(`- HailTrace configured: ${yesNo(Boolean(process.env.HAILTRACE_API_B
 console.log(`- Jira configured: ${yesNo(Boolean(process.env.JIRA_BASE_URL && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN))}`);
 console.log(`- Slack configured: ${yesNo(Boolean(process.env.SLACK_WEBHOOK_URL))}`);
 console.log(`- Zoho Cliq configured: ${yesNo(Boolean(process.env.ZOHO_CLIQ_WEBHOOK_URL))}`);
+console.log(`- Customer.io configured: ${yesNo(Boolean(process.env.CUSTOMERIO_APP_API_KEY && process.env.CUSTOMERIO_INVITE_TEMPLATE_ID && process.env.CUSTOMERIO_RESET_TEMPLATE_ID))}`);
+console.log(`- APP_PUBLIC_URL set: ${yesNo(Boolean(process.env.APP_PUBLIC_URL))}`);
 console.log("");
 console.log("Workspace state");
 console.log(`- dist/ present: ${yesNo(buildPresent)}`);
@@ -54,7 +56,7 @@ console.log(`- accounts file present: ${yesNo(Array.isArray(accounts))}`);
 console.log(`- user count: ${accountCount}`);
 console.log(`- admin count: ${adminCount}`);
 if (accountCount > 0 && adminCount === 0) {
-  console.log("- note: legacy account data detected with no admin role; start the hardened server once to auto-promote the first account.");
+  console.log("- WARNING: account data has no admin. Either delete data/accounts.json and let /register bootstrap a fresh admin, or manually set one account's role to \"admin\" before publishing. The server does not auto-promote.");
 }
 console.log("");
 console.log("Manual checks before publish");

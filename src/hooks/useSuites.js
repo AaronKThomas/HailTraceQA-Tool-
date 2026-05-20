@@ -122,12 +122,12 @@ export function useSuites({
       loginSuitesRanForRef.current = null;
       return;
     }
-    if (loginSuitesRanForRef.current === currentUser.username) return;
+    if (loginSuitesRanForRef.current === currentUser.email) return;
     const loginSuites = suites.filter((suite) => suite.schedule === "On Login");
     if (!loginSuites.length) return;
 
     // Guard against duplicate auto-runs during login hydration and re-renders.
-    loginSuitesRanForRef.current = currentUser.username;
+    loginSuitesRanForRef.current = currentUser.email;
     const timer = window.setTimeout(() => {
       loginSuites.forEach((suite) => {
         runSuite(suite.id);

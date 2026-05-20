@@ -60,7 +60,7 @@ export function useTests({
       addHistoryEntry({
         id: genId(),
         timestamp: new Date(),
-        username: currentUser.username,
+        email: currentUser.email,
         displayName: currentUser.displayName,
         description: description.slice(0, 120),
         jiraKey: jiraKey || null,
@@ -88,7 +88,7 @@ export function useTests({
       addHistoryEntry({
         id: genId(),
         timestamp: new Date(),
-        username: currentUser.username,
+        email: currentUser.email,
         displayName: currentUser.displayName,
         description: description.slice(0, 120),
         jiraKey: jiraKey || null,

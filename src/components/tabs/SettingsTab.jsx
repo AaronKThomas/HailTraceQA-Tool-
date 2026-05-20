@@ -6,14 +6,17 @@ export default function SettingsTab({
   currentUser,
   accounts,
   onAddUser,
+  onInviteUser,
   onRemoveUser,
   onLogout,
   onTestSlack,
   onTestZohoCliq,
 }) {
   const [form, setForm] = useState(settings);
-  const [newUser, setNewUser] = useState({ username: "", displayName: "", password: "", confirm: "" });
+  const [newUser, setNewUser] = useState({ email: "", displayName: "", password: "", confirm: "" });
+  const [newInvite, setNewInvite] = useState({ email: "", displayName: "" });
   const [adminMessage, setAdminMessage] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -34,11 +37,22 @@ export default function SettingsTab({
     try {
       await onAddUser(newUser);
       setAdminMessage(`✓ ${newUser.displayName} added`);
-      setNewUser({ username: "", displayName: "", password: "", confirm: "" });
+      setNewUser({ email: "", displayName: "", password: "", confirm: "" });
     } catch (error) {
       setAdminMessage(error.message);
     }
     window.setTimeout(() => setAdminMessage(""), 3000);
+  }
+
+  async function handleInviteUser() {
+    try {
+      await onInviteUser(newInvite);
+      setInviteMessage(`✓ Invite sent to ${newInvite.email}`);
+      setNewInvite({ email: "", displayName: "" });
+    } catch (error) {
+      setInviteMessage(error.message);
+    }
+    window.setTimeout(() => setInviteMessage(""), 4000);
   }
 
   return (
@@ -174,9 +188,26 @@ export default function SettingsTab({
         <div className="settings-section stagger" style={{ animationDelay: "170ms" }}>
           <div className="settings-section-title">Admin — User Management</div>
           <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 10 }}>Add New User</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>Invite User by Email</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
+              Sends a one-time link so the new user can set their own password. Link expires in 72 hours.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+              <input className="settings-input" type="email" autoComplete="off" placeholder="email@hailtrace.com" value={newInvite.email} onChange={(event) => setNewInvite((current) => ({ ...current, email: event.target.value }))} />
+              <input className="settings-input" placeholder="Display Name" value={newInvite.displayName} onChange={(event) => setNewInvite((current) => ({ ...current, displayName: event.target.value }))} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button className="settings-save-btn" style={{ marginTop: 0 }} onClick={handleInviteUser}>Send Invite</button>
+              <span style={{ fontSize: 12, color: inviteMessage.startsWith("✓") ? "var(--pass)" : "var(--fail)" }}>{inviteMessage}</span>
+            </div>
+          </div>
+          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>Add New User (set password directly)</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
+              Use this only when you cannot email the user. Avoid hand-rolled passwords when an invite is possible.
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-              <input className="settings-input" placeholder="Username" value={newUser.username} onChange={(event) => setNewUser((current) => ({ ...current, username: event.target.value }))} />
+              <input className="settings-input" type="email" autoComplete="off" placeholder="email@hailtrace.com" value={newUser.email} onChange={(event) => setNewUser((current) => ({ ...current, email: event.target.value }))} />
               <input className="settings-input" placeholder="Display Name" value={newUser.displayName} onChange={(event) => setNewUser((current) => ({ ...current, displayName: event.target.value }))} />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
@@ -194,16 +225,20 @@ export default function SettingsTab({
             ) : (
               <table className="admin-table">
                 <thead>
-                  <tr><th>Username</th><th>Display Name</th><th>Role</th><th>Added</th><th /></tr>
+                  <tr><th>Email</th><th>Display Name</th><th>Role</th><th>Status</th><th>Added</th><th /></tr>
                 </thead>
                 <tbody>
                   {accounts.map((account) => (
-                    <tr key={account.username}>
-                      <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{account.username}</td>
+                    <tr key={account.email}>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{account.email}</td>
                       <td>{account.displayName}</td>
                       <td><span className="admin-badge" style={{ background: account.role === "admin" ? "rgba(10,132,255,0.15)" : "rgba(48,209,88,0.15)", color: account.role === "admin" ? "var(--accent)" : "var(--pass)" }}>{account.role}</span></td>
+                      <td>{account.status === "pending"
+                        ? <span className="admin-badge" style={{ background: "rgba(255,159,10,0.18)", color: "#ff9f0a" }}>pending</span>
+                        : <span className="admin-badge" style={{ background: "rgba(120,120,120,0.15)", color: "var(--muted)" }}>active</span>}
+                      </td>
                       <td style={{ color: "var(--muted)", fontSize: 12 }}>{account.registeredAt ? new Date(account.registeredAt).toLocaleDateString() : "—"}</td>
-                      <td>{account.username !== currentUser.username ? <button className="danger-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => onRemoveUser(account.username)}>Remove</button> : null}</td>
+                      <td>{account.email !== currentUser.email ? <button className="danger-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => onRemoveUser(account.email)}>Remove</button> : null}</td>
                     </tr>
                   ))}
                 </tbody>
