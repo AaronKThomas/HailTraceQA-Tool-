@@ -21,6 +21,22 @@ This is the fastest path for another developer to run the project locally and ve
 npm install
 ```
 
+### Mac
+
+```bash
+npm install
+cp .env.example .env
+openssl rand -base64 48
+```
+
+### Windows (PowerShell)
+
+```powershell
+npm install
+Copy-Item .env.example .env
+[Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }))
+```
+
 ## 2. Create your local env file
 
 Start from the example:
@@ -49,6 +65,12 @@ Generate a strong session secret with:
 
 ```bash
 openssl rand -base64 48
+```
+
+On Windows PowerShell, use:
+
+```powershell
+[Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }))
 ```
 
 ## 3. Start the backend
@@ -126,3 +148,4 @@ Fill in the relevant keys in `.env`:
 - Session auth is cookie-based and enforced by the backend.
 - The frontend should point at `http://localhost:3001` unless you intentionally change the backend URL in Settings.
 - This is an internal tool, not a customer-facing multitenant system.
+- Core npm scripts work on both macOS and Windows. Only small helper commands like copying `.env` or generating secrets differ by shell.
