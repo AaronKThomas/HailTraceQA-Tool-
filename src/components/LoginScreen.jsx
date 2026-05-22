@@ -54,35 +54,35 @@ export default function LoginScreen({ onLogin, onRegister }) {
           {mode === "login" ? "Sign in to your account" : "Create your account"}
         </div>
       </div>
-      <div className="login-card">
+      <div className="login-card" aria-live="polite">
         <div className="seg-control">
           <div className="seg-pill" id="seg-pill" style={{ left: mode === "login" ? "3px" : "calc(50% + 1.5px)" }} />
-          <button className={`seg-btn ${mode === "login" ? "active" : ""}`} onClick={() => setMode("login")}>Sign In</button>
-          <button className={`seg-btn ${mode === "register" ? "active" : ""}`} onClick={() => setMode("register")}>Register</button>
+          <button type="button" className={`seg-btn ${mode === "login" ? "active" : ""}`} aria-pressed={mode === "login"} onClick={() => setMode("login")}>Sign In</button>
+          <button type="button" className={`seg-btn ${mode === "register" ? "active" : ""}`} aria-pressed={mode === "register"} onClick={() => setMode("register")}>Register</button>
         </div>
         <div className="login-fields">
           <div className="field-group">
-            <label>Email</label>
-            <input type="email" autoComplete="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} placeholder="you@hailtrace.com" onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
+            <label htmlFor="login-email">Email</label>
+            <input id="login-email" type="email" autoComplete="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} placeholder="you@hailtrace.com" onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
           </div>
           {mode === "register" && (
             <div className="field-group">
-              <label>Display Name</label>
-              <input value={form.displayName} onChange={(event) => updateField("displayName", event.target.value)} placeholder="Your Name" onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
+              <label htmlFor="register-display-name">Display Name</label>
+              <input id="register-display-name" value={form.displayName} onChange={(event) => updateField("displayName", event.target.value)} placeholder="Your Name" onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
             </div>
           )}
           <div className="field-group">
-            <label>Password</label>
-            <input type="password" value={form.password} onChange={(event) => updateField("password", event.target.value)} placeholder={mode === "register" ? "12+ characters" : "••••••"} onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
+            <label htmlFor="login-password">Password</label>
+            <input id="login-password" type="password" value={form.password} onChange={(event) => updateField("password", event.target.value)} placeholder={mode === "register" ? "12+ characters" : "••••••"} onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
           </div>
           {mode === "register" && (
             <div className="field-group">
-              <label>Confirm Password</label>
-              <input type="password" value={form.confirm} onChange={(event) => updateField("confirm", event.target.value)} placeholder="••••••" onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
+              <label htmlFor="register-confirm-password">Confirm Password</label>
+              <input id="register-confirm-password" type="password" value={form.confirm} onChange={(event) => updateField("confirm", event.target.value)} placeholder="••••••" onKeyDown={(event) => event.key === "Enter" && handleSubmit()} />
             </div>
           )}
         </div>
-        {error ? <div className="login-error">{error}</div> : null}
+        {error ? <div className="login-error" role="alert">{error}</div> : null}
         <button className="login-btn" disabled={!isValid || submitting} onClick={handleSubmit}>
           {submitting ? (mode === "login" ? "Signing in…" : "Creating account…") : (mode === "login" ? "Sign In" : "Create Account")}
         </button>
@@ -93,7 +93,7 @@ export default function LoginScreen({ onLogin, onRegister }) {
         ) : null}
         <div className="login-footer">
           {mode === "login" ? "Don't have an account?" : "Already have an account?"}{" "}
-          <button onClick={() => setMode(mode === "login" ? "register" : "login")}>
+          <button type="button" onClick={() => setMode(mode === "login" ? "register" : "login")}>
             {mode === "login" ? "Register" : "Sign In"}
           </button>
         </div>

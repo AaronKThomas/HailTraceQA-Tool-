@@ -1,30 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
 import AcceptInvite from "./components/AcceptInvite";
 import AppShell from "./components/AppShell";
 import ForgotPassword from "./components/ForgotPassword";
 import LoginScreen from "./components/LoginScreen";
 import ResetPassword from "./components/ResetPassword";
 import Toast from "./components/Toast";
-import DashboardTab from "./components/tabs/DashboardTab";
-import HistoryTab from "./components/tabs/HistoryTab";
-import SettingsTab from "./components/tabs/SettingsTab";
-import SuitesTab from "./components/tabs/SuitesTab";
-import TemplatesTab from "./components/tabs/TemplatesTab";
-import TestsTab from "./components/tabs/TestsTab";
-import { DASHBOARD_ENDPOINTS } from "./lib/constants";
-import { checkEndpoint, fetchHealth, fetchIntegrationsHealth, pingServer, testSlackWebhookRequest, testZohoCliqWebhookRequest } from "./lib/api";
-import { writeJson } from "./lib/storage";
-import { exportSuiteReport, exportTestsReport } from "./lib/export";
+import WorkspaceTabs from "./components/WorkspaceTabs";
+import { testSlackWebhookRequest, testZohoCliqWebhookRequest } from "./lib/api";
+import { exportTestsReport } from "./lib/export";
 import { genId } from "./lib/utils";
 import { useAccounts } from "./hooks/useAccounts";
 import { useAuth } from "./hooks/useAuth";
 import { useSuites } from "./hooks/useSuites";
 import { useTests } from "./hooks/useTests";
 import { useToast } from "./hooks/useToast";
-
-function getUserKey(prefix, email) {
-  return `${prefix}:${String(email || "").toLowerCase()}`;
-}
+import { useWorkspaceState } from "./hooks/useWorkspaceState";
 
 // Lightweight pathname routing for the three public auth-flow pages. We
 // intentionally avoid pulling in react-router for a 3-route surface — these
@@ -41,12 +30,6 @@ export default function App() {
 }
 
 function AuthenticatedApp() {
-  const [activeTab, setActiveTab] = useState("tests");
-  const [historyFilter, setHistoryFilter] = useState("all");
-  const [historySearch, setHistorySearch] = useState("");
-  const [serverStatus, setServerStatus] = useState("unknown");
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-
   const {
     toast,
     showToast,
@@ -100,6 +83,22 @@ function AuthenticatedApp() {
   } = useAccounts(settings.backendUrl, currentUser);
 
   const {
+    activeTab,
+    setActiveTab,
+    historyFilter,
+    setHistoryFilter,
+    historySearch,
+    setHistorySearch,
+    serverStatus,
+  } = useWorkspaceState({
+    settings,
+    currentUser,
+    history,
+    templates,
+    suites,
+  });
+
+  const {
     createSuite,
     deleteSuite,
     cloneSuite,
@@ -121,58 +120,8 @@ function AuthenticatedApp() {
     setActiveTab,
   });
 
-  useEffect(() => {
-    document.body.classList.toggle("light", settings.theme === "light");
-  }, [settings.theme]);
-
-  // Keep the server indicator tied to the selected backend URL so reviewers can
-  // immediately tell whether they are exercising the mock server or a real one.
-  useEffect(() => {
-    let active = true;
-    pingServer(settings.backendUrl).then((status) => {
-      if (active) setServerStatus(status);
-    });
-    return () => {
-      active = false;
-    };
-  }, [settings.backendUrl]);
-
-  useEffect(() => {
-    if (!currentUser) return undefined;
-
-    // Persist each user-owned slice separately so a page refresh preserves the
-    // current workspace without forcing a more complex client store.
-    [
-      ["history", history],
-      ["templates", templates],
-      ["suites", suites],
-      ["settings", settings],
-    ].forEach(([prefix, value]) => {
-      writeJson(getUserKey(prefix, currentUser.email), value);
-    });
-
-    return undefined;
-  }, [currentUser, history, templates, suites, settings]);
-
-  useEffect(() => {
-    if (!dropdownOpen) return undefined;
-
-    // The mobile dropdown sits outside the normal tab flow, so clicking away
-    // should close it without affecting the desktop sidebar state.
-    function handleClick(event) {
-      const menu = document.querySelector(".dropdown-menu");
-      const button = document.querySelector(".hamburger");
-      if (menu && button && !menu.contains(event.target) && !button.contains(event.target)) {
-        setDropdownOpen(false);
-      }
-    }
-    document.addEventListener("click", handleClick);
-    return () => document.removeEventListener("click", handleClick);
-  }, [dropdownOpen]);
-
   function handleLogout() {
     baseLogout();
-    setDropdownOpen(false);
     setActiveTab("tests");
   }
 
@@ -241,125 +190,6 @@ function AuthenticatedApp() {
     }
   }
 
-  // Keep the composition root explicit for reviewers: feature behavior lives in
-  // hooks and leaf components, while App owns wiring and tab-level routing.
-  const renderedTab = useMemo(() => {
-    switch (activeTab) {
-      case "history":
-        return (
-          <HistoryTab
-            currentUser={currentUser}
-            history={history}
-            filter={historyFilter}
-            search={historySearch}
-            setFilter={setHistoryFilter}
-            setSearch={setHistorySearch}
-            onClear={() => setHistory([])}
-            onRerun={async (entry) => {
-              const didStart = await rerunFromHistory(entry);
-              if (didStart) setActiveTab("tests");
-            }}
-          />
-        );
-      case "templates":
-        return <TemplatesTab templates={templates} onAdd={addTemplate} onUse={useTemplate} onDelete={deleteTemplate} />;
-      case "suites":
-        return (
-          <SuitesTab
-            suites={suites}
-            history={history}
-            templates={templates}
-            onCreate={createSuite}
-            onDelete={deleteSuite}
-            onClone={cloneSuite}
-            onSchedule={setSuiteSchedule}
-            onAddSuiteTest={addSuiteTest}
-            onRemoveSuiteTest={removeSuiteTest}
-            onRunSuite={runSuite}
-            onRunSingleSuiteTest={runSingleSuiteTest}
-            exportDefaultFormat={settings.exportFormat}
-            onExportSuiteReport={(suiteId, format) => exportSuiteReport(
-              suites.find((suite) => suite.id === suiteId),
-              tests,
-              format || settings.exportFormat,
-              currentUser,
-            )}
-            onImportDescription={importDescriptionToSuite}
-          />
-        );
-      case "dashboard":
-        return (
-          <DashboardTab
-            onRefresh={() => Promise.all(DASHBOARD_ENDPOINTS.map((endpoint) => checkEndpoint(settings.backendUrl, endpoint.path, endpoint.method)))}
-            onCustomCheck={(path, method) => checkEndpoint(settings.backendUrl, path, method)}
-            onFetchHealth={() => fetchHealth(settings.backendUrl)}
-            onFetchIntegrationsHealth={() => fetchIntegrationsHealth(settings.backendUrl)}
-          />
-        );
-      case "settings":
-        return (
-          <SettingsTab
-            settings={settings}
-            onSave={handleSaveSettings}
-            currentUser={currentUser}
-            accounts={accounts}
-            onAddUser={addUser}
-            onInviteUser={inviteUser}
-            onRemoveUser={deleteUser}
-            onLogout={handleLogout}
-            onTestSlack={handleTestSlack}
-            onTestZohoCliq={handleTestZohoCliq}
-          />
-        );
-      case "tests":
-      default:
-        return (
-          <TestsTab
-            tests={tests}
-            running={running}
-            fetchingJira={fetchingJira}
-            onInitiateTest={initiateTest}
-            onRemoveTest={removeTest}
-            onRerunTest={rerunTest}
-            onSaveAsTemplate={saveAsTemplate}
-            draftInput={testDraft}
-            setDraftInput={setTestDraft}
-          />
-        );
-    }
-  }, [
-    activeTab,
-    accounts,
-    createSuite,
-    currentUser,
-    deleteSuite,
-    deleteTemplate,
-    history,
-    historyFilter,
-    historySearch,
-    rerunFromHistory,
-    settings,
-    suites,
-    templates,
-    tests,
-    running,
-    fetchingJira,
-    initiateTest,
-    removeTest,
-    rerunTest,
-    testDraft,
-    addUser,
-    inviteUser,
-    deleteUser,
-    addSuiteTest,
-    removeSuiteTest,
-    runSuite,
-    runSingleSuiteTest,
-    importDescriptionToSuite,
-    cloneSuite,
-    setSuiteSchedule,
-  ]);
-
   if (!authReady) {
     return null;
   }
@@ -388,10 +218,51 @@ function AuthenticatedApp() {
         showClear={tests.length > 0 && !running}
         stats={stats}
         serverStatus={serverStatus}
-        dropdownOpen={dropdownOpen}
-        setDropdownOpen={setDropdownOpen}
       >
-        {renderedTab}
+        <WorkspaceTabs
+          activeTab={activeTab}
+          currentUser={currentUser}
+          history={history}
+          historyFilter={historyFilter}
+          historySearch={historySearch}
+          setHistory={setHistory}
+          setHistoryFilter={setHistoryFilter}
+          setHistorySearch={setHistorySearch}
+          templates={templates}
+          suites={suites}
+          tests={tests}
+          running={running}
+          fetchingJira={fetchingJira}
+          settings={settings}
+          accounts={accounts}
+          addUser={addUser}
+          inviteUser={inviteUser}
+          deleteUser={deleteUser}
+          deleteSuite={deleteSuite}
+          createSuite={createSuite}
+          cloneSuite={cloneSuite}
+          setSuiteSchedule={setSuiteSchedule}
+          addSuiteTest={addSuiteTest}
+          removeSuiteTest={removeSuiteTest}
+          runSuite={runSuite}
+          runSingleSuiteTest={runSingleSuiteTest}
+          importDescriptionToSuite={importDescriptionToSuite}
+          addTemplate={addTemplate}
+          useTemplate={useTemplate}
+          deleteTemplate={deleteTemplate}
+          rerunFromHistory={rerunFromHistory}
+          setActiveTab={setActiveTab}
+          initiateTest={initiateTest}
+          removeTest={removeTest}
+          rerunTest={rerunTest}
+          saveAsTemplate={saveAsTemplate}
+          testDraft={testDraft}
+          setTestDraft={setTestDraft}
+          handleSaveSettings={handleSaveSettings}
+          handleLogout={handleLogout}
+          handleTestSlack={handleTestSlack}
+          handleTestZohoCliq={handleTestZohoCliq}
+        />
       </AppShell>
       <Toast toast={toast} />
     </>

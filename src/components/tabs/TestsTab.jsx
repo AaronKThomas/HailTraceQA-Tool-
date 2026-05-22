@@ -84,6 +84,11 @@ export default function TestsTab({
   const [openDetailId, setOpenDetailId] = useState(null);
 
   const jiraDetected = useMemo(() => parseJiraUrl(draftInput.trim()), [draftInput]);
+  const testsStatusMessage = running
+    ? "Running tests."
+    : fetchingJira
+      ? "Loading Jira ticket details."
+      : `${tests.length} test${tests.length === 1 ? "" : "s"} in the current workspace.`;
 
   async function handleRun() {
     const raw = draftInput.trim();
@@ -94,6 +99,7 @@ export default function TestsTab({
 
   return (
     <>
+      <div className="sr-only" aria-live="polite">{testsStatusMessage}</div>
       <div className="input-card stagger" style={{ animationDelay: "0ms" }}>
         <div className="input-header">
           <span className="input-label">New Test</span>
@@ -102,10 +108,12 @@ export default function TestsTab({
             <span className="powered-by">Powered by OpenAI</span>
           </div>
         </div>
+        <label className="sr-only" htmlFor="test-input">Describe a feature to test or paste a Jira ticket</label>
         <textarea
           id="test-input"
           value={draftInput}
           disabled={running}
+          aria-describedby="test-input-help test-run-status"
           placeholder={"Describe a feature to test, or paste a Jira URL / key (one per line)\n\nExamples:\n  • User should be able to submit a hail damage report\n  • HT-108\n  • https://yourcompany.atlassian.net/browse/HT-108"}
           onChange={(event) => setDraftInput(event.target.value)}
           onKeyDown={(event) => {
@@ -118,7 +126,8 @@ export default function TestsTab({
         <div className="input-footer">
           <div className={`progress-bar-wrap ${running ? "show" : ""}`}><div className="progress-bar-fill" /></div>
           <div className="input-actions">
-            <span className="input-hint">{running ? "Running…" : ""}</span>
+            <span id="test-input-help" className="input-hint">Press Ctrl+Enter or Cmd+Enter to run.</span>
+            <span id="test-run-status" className="sr-only">{running ? "Test execution in progress." : "Test execution idle."}</span>
             <button className={`run-btn ${running ? "running" : ""}`} disabled={!draftInput.trim() || running || fetchingJira} onClick={handleRun}>
               {running ? <><span className="spinner" /> Analyzing…</> : "Run Test"}
             </button>
@@ -135,21 +144,23 @@ export default function TestsTab({
         ) : (
           <>
             <div className="tests-count">{tests.length} {tests.length === 1 ? "test" : "tests"}</div>
-            <div className="tests-list">
+            <div className="tests-list" aria-label="Queued and completed tests">
               {tests.map((test, index) => {
                 const config = STATUS_CONFIG[test.status];
                 const hasOutput = (test.output || test.playwrightLog || test.apiResults?.length) && test.status !== STATUS.idle;
                 const isRunning = test.status === STATUS.running;
                 const isCompleted = test.status !== STATUS.idle && test.status !== STATUS.running;
+                const detailId = `test-detail-${test.id}`;
+                const headingId = `test-title-${test.id}`;
 
                 return (
                   <div className="stagger" style={{ animationDelay: `${index * 10}ms` }} key={test.id}>
-                    <div className="test-card" style={{ border: `1px solid ${config.border}` }}>
+                    <article className="test-card" style={{ border: `1px solid ${config.border}` }} aria-labelledby={headingId}>
                       <div className="test-card-header">
                         <span className="test-num">{String(index + 1).padStart(2, "0")}</span>
                         <div className="test-body">
                           {test.jiraKey ? <div className="test-jira">{test.jiraKey} · {test.jiraSummary || ""}</div> : null}
-                          <div className="test-desc">{test.description.length > 160 ? `${test.description.slice(0, 160)}…` : test.description}</div>
+                          <h2 id={headingId} className="test-desc">{test.description.length > 160 ? `${test.description.slice(0, 160)}…` : test.description}</h2>
                           {isRunning ? <div className="test-running-label">Running test…</div> : null}
                           <div className="test-badges">
                             <span className="source-badge" style={{ color: test.source === "jira" ? "var(--accent)" : "var(--muted)", background: test.source === "jira" ? "rgba(10,132,255,0.12)" : "rgba(128,128,128,0.08)", borderColor: test.source === "jira" ? "rgba(10,132,255,0.25)" : "var(--border)" }}>
@@ -159,15 +170,15 @@ export default function TestsTab({
                               <span className="tag-dot" style={{ background: config.dot, ...(isRunning ? { animation: "blink 1.2s ease-in-out infinite" } : {}) }} />
                               {config.label}
                             </span>
-                            {hasOutput ? <button className="view-btn" onClick={() => setOpenDetailId((current) => current === test.id ? null : test.id)}>{openDetailId === test.id ? "Hide" : "View"}</button> : null}
-                            {isCompleted ? <button className="rerun-btn" onClick={() => onRerunTest(test.id)}>↺ Re-run</button> : null}
-                            {test.status === STATUS.idle ? <button className="remove-btn" onClick={() => onRemoveTest(test.id)}>×</button> : null}
+                            {hasOutput ? <button className="view-btn" aria-expanded={openDetailId === test.id} aria-controls={detailId} onClick={() => setOpenDetailId((current) => current === test.id ? null : test.id)}>{openDetailId === test.id ? "Hide" : "View"}</button> : null}
+                            {isCompleted ? <button className="rerun-btn" aria-label={`Re-run test ${index + 1}`} onClick={() => onRerunTest(test.id)}>↺ Re-run</button> : null}
+                            {test.status === STATUS.idle ? <button className="remove-btn" aria-label={`Remove test ${index + 1}`} onClick={() => onRemoveTest(test.id)}>×</button> : null}
                             {test.status === STATUS.idle ? <button className="view-btn" onClick={() => onSaveAsTemplate(test.id)}>Save as template</button> : null}
                           </div>
                         </div>
                       </div>
-                      {openDetailId === test.id ? <TestDetail test={test} /> : null}
-                    </div>
+                      {openDetailId === test.id ? <div id={detailId} role="region" aria-label={`Details for test ${index + 1}`}><TestDetail test={test} /></div> : null}
+                    </article>
                   </div>
                 );
               })}

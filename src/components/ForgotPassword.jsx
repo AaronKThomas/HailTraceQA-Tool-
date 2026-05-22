@@ -31,8 +31,9 @@ export default function ForgotPassword() {
           <>
             <div className="login-fields">
               <div className="field-group">
-                <label>Email</label>
+                <label htmlFor="forgot-password-email">Email</label>
                 <input
+                  id="forgot-password-email"
                   type="email"
                   autoComplete="email"
                   value={email}
@@ -51,7 +52,7 @@ export default function ForgotPassword() {
           </>
         ) : (
           <>
-            <div className="login-fields">
+            <div className="login-fields" role="status" aria-live="polite">
               <p style={{ margin: 0, color: "var(--text)", fontSize: 14, lineHeight: 1.5 }}>
                 If an account exists for that email, we have sent a reset link.
                 Check your inbox. The link expires in 1 hour.

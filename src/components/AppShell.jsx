@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import ExportMenu from "./ExportMenu";
 import { EXPORT_FORMATS } from "../lib/export";
 import { useExportConfirmation } from "../hooks/useExportConfirmation";
@@ -25,14 +25,43 @@ export default function AppShell({
   showClear,
   stats,
   serverStatus,
-  dropdownOpen,
-  setDropdownOpen,
   children,
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  const dropdownButtonRef = useRef(null);
+  const dropdownId = useId();
   const serverColor = serverStatus === "ok" ? "var(--pass)" : serverStatus === "error" ? "var(--fail)" : "var(--faint)";
   const serverLabel = serverStatus === "ok" ? "Server online" : serverStatus === "error" ? "Server offline" : "Checking…";
   const ran = stats.pass + stats.fail + stats.manual;
+  const activeTabLabel = SIDEBAR_NAV.find((item) => item.id === activeTab)?.label || "Workspace";
+
+  useEffect(() => {
+    if (!dropdownOpen) return undefined;
+
+    function handlePointerDown(event) {
+      const menu = dropdownRef.current;
+      const button = dropdownButtonRef.current;
+      if (menu && !menu.contains(event.target) && button && !button.contains(event.target)) {
+        setDropdownOpen(false);
+      }
+    }
+
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setDropdownOpen(false);
+        dropdownButtonRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [dropdownOpen]);
 
   const { requestExport, exportModal } = useExportConfirmation(onExport, {
     title: "Export test results?",
@@ -44,7 +73,8 @@ export default function AppShell({
 
   return (
     <div id="app" className={`visible ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className={`desktop-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <aside className={`desktop-sidebar ${sidebarCollapsed ? "collapsed" : ""}`} aria-label="Primary">
         <div className="desktop-sidebar-inner">
           <div className="desktop-brand">
             <div className="desktop-brand-mark">HT</div>
@@ -52,7 +82,7 @@ export default function AppShell({
               <div className="desktop-brand-title">HailTrace QA</div>
               <div className="desktop-brand-subtitle">Team workspace</div>
             </div>
-            <button className="desktop-sidebar-toggle" onClick={() => setSidebarCollapsed((current) => !current)} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+            <button type="button" className="desktop-sidebar-toggle" onClick={() => setSidebarCollapsed((current) => !current)} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
               {sidebarCollapsed ? "→" : "←"}
             </button>
           </div>
@@ -65,7 +95,7 @@ export default function AppShell({
             </div>
           </div>
 
-          <div className="desktop-sidebar-section">
+          <nav className="desktop-sidebar-section" aria-label="Workspace sections">
             <div className="desktop-sidebar-label">Navigation</div>
             {SIDEBAR_NAV.map((item) => (
               <button
@@ -81,7 +111,7 @@ export default function AppShell({
                 <span className="desktop-sidebar-copy">{item.label}</span>
               </button>
             ))}
-          </div>
+          </nav>
 
           {ran > 0 ? (
             <div className="desktop-sidebar-section">
@@ -121,17 +151,17 @@ export default function AppShell({
 
       {exportModal}
       <div className="app-stage">
-      <nav>
+      <nav className="app-top-nav" aria-label="Top bar">
         <div className="nav-left">
           <span className="nav-title">HailTrace QA</span>
-          <div className="server-indicator">
-            <div className="server-dot" style={{ background: serverColor }} />
+          <div className="server-indicator" role="status" aria-live="polite">
+            <div className="server-dot" style={{ background: serverColor }} aria-hidden="true" />
             <span className="server-label" style={{ color: serverStatus === "error" ? "var(--fail)" : "var(--muted)" }}>{serverLabel}</span>
           </div>
         </div>
-        <div className="nav-center">
-          <button className={`tab-btn ${activeTab === "tests" ? "active" : ""}`} onClick={() => onTabChange("tests")}>Tests</button>
-          <button className={`tab-btn ${activeTab === "history" ? "active" : ""}`} onClick={() => onTabChange("history")}>
+        <div className="nav-center" aria-label="Primary views">
+          <button type="button" className={`tab-btn ${activeTab === "tests" ? "active" : ""}`} aria-current={activeTab === "tests" ? "page" : undefined} onClick={() => onTabChange("tests")}>Tests</button>
+          <button type="button" className={`tab-btn ${activeTab === "history" ? "active" : ""}`} aria-current={activeTab === "history" ? "page" : undefined} onClick={() => onTabChange("history")}>
             History
           </button>
         </div>
@@ -146,10 +176,18 @@ export default function AppShell({
           {showExport ? (
             <ExportMenu compact defaultFormat={exportDefaultFormat} onExport={requestExport} disabled={exportDisabled} />
           ) : null}
-          {showClear ? <button className="ghost-btn" onClick={onClearTests}>Clear</button> : null}
-          <div className="avatar">{currentUser.displayName?.[0] || "?"}</div>
-          <button className="ghost-btn sign-out-btn" onClick={onLogout}>Sign out</button>
-          <button className={`hamburger ${dropdownOpen ? "open" : ""}`} onClick={() => setDropdownOpen((current) => !current)} aria-label="Menu">
+          {showClear ? <button type="button" className="ghost-btn" onClick={onClearTests}>Clear</button> : null}
+          <div className="avatar" aria-hidden="true">{currentUser.displayName?.[0] || "?"}</div>
+          <button type="button" className="ghost-btn sign-out-btn" onClick={onLogout}>Sign out</button>
+          <button
+            ref={dropdownButtonRef}
+            type="button"
+            className={`hamburger ${dropdownOpen ? "open" : ""}`}
+            onClick={() => setDropdownOpen((current) => !current)}
+            aria-label="Open workspace menu"
+            aria-expanded={dropdownOpen}
+            aria-controls={dropdownId}
+          >
             <span />
             <span />
             <span />
@@ -157,9 +195,15 @@ export default function AppShell({
         </div>
       </nav>
 
-      <div className={`dropdown-menu ${dropdownOpen ? "show" : ""}`}>
+      <div
+        id={dropdownId}
+        ref={dropdownRef}
+        className={`dropdown-menu ${dropdownOpen ? "show" : ""}`}
+        aria-label="Workspace menu"
+        hidden={!dropdownOpen}
+      >
         <div className="dropdown-user">
-          <div className="dropdown-user-avatar">{currentUser.displayName?.[0] || "?"}</div>
+          <div className="dropdown-user-avatar" aria-hidden="true">{currentUser.displayName?.[0] || "?"}</div>
           <div>
             <div className="dropdown-user-name">{currentUser.displayName}</div>
             <div className="dropdown-user-role">QA Tester</div>
@@ -182,6 +226,7 @@ export default function AppShell({
           {showExport ? EXPORT_FORMATS.map((format) => (
             <button
               key={format.id}
+              type="button"
               className="dropdown-item"
               onClick={() => { requestExport(format.id); setDropdownOpen(false); }}
             >
@@ -189,25 +234,28 @@ export default function AppShell({
               Export {format.label}
             </button>
           )) : null}
-          <button className="dropdown-item" onClick={() => { onClearTests(); setDropdownOpen(false); }}><span className="dropdown-item-icon">⊘</span> Clear Tests</button>
-          <button className="dropdown-item" onClick={() => { onTabChange("settings"); setDropdownOpen(false); }}><span className="dropdown-item-icon">⚙</span> Settings</button>
-          <button className="dropdown-item" onClick={() => { onTabChange("templates"); setDropdownOpen(false); }}><span className="dropdown-item-icon">📋</span> Templates</button>
-          <button className="dropdown-item" onClick={() => { onTabChange("suites"); setDropdownOpen(false); }}><span className="dropdown-item-icon">🧪</span> Test Suites</button>
-          <button className="dropdown-item" onClick={() => { onTabChange("dashboard"); setDropdownOpen(false); }}><span className="dropdown-item-icon">📊</span> API Dashboard</button>
+          <button type="button" className="dropdown-item" onClick={() => { onClearTests(); setDropdownOpen(false); }}><span className="dropdown-item-icon">⊘</span> Clear Tests</button>
+          <button type="button" className="dropdown-item" onClick={() => { onTabChange("settings"); setDropdownOpen(false); }}><span className="dropdown-item-icon">⚙</span> Settings</button>
+          <button type="button" className="dropdown-item" onClick={() => { onTabChange("templates"); setDropdownOpen(false); }}><span className="dropdown-item-icon">📋</span> Templates</button>
+          <button type="button" className="dropdown-item" onClick={() => { onTabChange("suites"); setDropdownOpen(false); }}><span className="dropdown-item-icon">🧪</span> Test Suites</button>
+          <button type="button" className="dropdown-item" onClick={() => { onTabChange("dashboard"); setDropdownOpen(false); }}><span className="dropdown-item-icon">📊</span> API Dashboard</button>
         </div>
         <div className="dropdown-section">
-          <button className="dropdown-item destructive" onClick={onLogout}><span className="dropdown-item-icon">→</span> Sign Out</button>
+          <button type="button" className="dropdown-item destructive" onClick={onLogout}><span className="dropdown-item-icon">→</span> Sign Out</button>
         </div>
       </div>
 
-      <div id="offline-banner" className={serverStatus === "error" ? "show" : ""}>
+      <div id="offline-banner" className={serverStatus === "error" ? "show" : ""} role="status" aria-live="polite">
         <span>●</span>
         <span>Server offline. {currentUser ? "Backend not reachable." : ""}</span>
       </div>
 
-      <div className="main">
-        <div id="tab-content">{children}</div>
-      </div>
+      <main id="main-content" className="main" tabIndex="-1">
+        <div id="tab-content" aria-labelledby="workspace-title">
+          <h1 id="workspace-title" className="sr-only">{activeTabLabel}</h1>
+          {children}
+        </div>
+      </main>
       </div>
     </div>
   );

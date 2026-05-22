@@ -67,11 +67,11 @@ export default function AcceptInvite() {
       </div>
       <div className="login-card">
         {tokenState.status === "loading" && (
-          <div className="login-fields">Checking your invite…</div>
+          <div className="login-fields" role="status" aria-live="polite">Checking your invite…</div>
         )}
         {tokenState.status === "invalid" && (
           <div className="login-fields">
-            <div className="login-error">This invite link is invalid or has expired.</div>
+            <div className="login-error" role="alert">This invite link is invalid or has expired.</div>
             <a className="login-footer" href="/">Return to sign in</a>
           </div>
         )}
@@ -79,20 +79,22 @@ export default function AcceptInvite() {
           <>
             <div className="login-fields">
               <div className="field-group">
-                <label>Email</label>
-                <input type="email" value={tokenState.email} disabled readOnly />
+                <label htmlFor="invite-email">Email</label>
+                <input id="invite-email" type="email" value={tokenState.email} disabled readOnly />
               </div>
               <div className="field-group">
-                <label>Display name</label>
+                <label htmlFor="invite-display-name">Display name</label>
                 <input
+                  id="invite-display-name"
                   value={form.displayName}
                   onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))}
                   onKeyDown={(event) => event.key === "Enter" && handleSubmit()}
                 />
               </div>
               <div className="field-group">
-                <label>Password</label>
+                <label htmlFor="invite-password">Password</label>
                 <input
+                  id="invite-password"
                   type="password"
                   autoComplete="new-password"
                   value={form.password}
@@ -102,8 +104,9 @@ export default function AcceptInvite() {
                 />
               </div>
               <div className="field-group">
-                <label>Confirm password</label>
+                <label htmlFor="invite-confirm-password">Confirm password</label>
                 <input
+                  id="invite-confirm-password"
                   type="password"
                   autoComplete="new-password"
                   value={form.confirm}
@@ -112,14 +115,14 @@ export default function AcceptInvite() {
                 />
               </div>
             </div>
-            {error ? <div className="login-error">{error}</div> : null}
+            {error ? <div className="login-error" role="alert">{error}</div> : null}
             <button className="login-btn" disabled={!isValid || submitting} onClick={handleSubmit}>
               {submitting ? "Setting password…" : "Set password and sign in"}
             </button>
           </>
         )}
         {done && (
-          <div className="login-fields">Welcome aboard. Redirecting you to the app…</div>
+          <div className="login-fields" role="status" aria-live="polite">Welcome aboard. Redirecting you to the app…</div>
         )}
       </div>
     </div>

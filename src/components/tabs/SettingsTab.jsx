@@ -57,14 +57,19 @@ export default function SettingsTab({
 
   return (
     <div className="settings-wrap">
+      <div className="sr-only" aria-live="polite">
+        {saved ? "Settings saved." : ""}
+        {inviteMessage ? ` ${inviteMessage}` : ""}
+        {adminMessage ? ` ${adminMessage}` : ""}
+      </div>
       <div className="settings-section stagger" style={{ animationDelay: "0ms" }}>
         <div className="settings-section-title">Connection</div>
         <div className="settings-row">
           <div className="settings-row-icon" style={{ background: "rgba(10,132,255,0.15)" }}>🔌</div>
           <div className="settings-row-body">
-            <div className="settings-row-label">Backend URL</div>
+            <label className="settings-row-label" htmlFor="settings-backend-url">Backend URL</label>
             <div className="settings-row-desc">Address of your local QA server</div>
-            <input className="settings-input mono" value={form.backendUrl} onChange={(event) => updateField("backendUrl", event.target.value)} />
+            <input id="settings-backend-url" className="settings-input mono" value={form.backendUrl} onChange={(event) => updateField("backendUrl", event.target.value)} />
           </div>
         </div>
       </div>
@@ -138,8 +143,8 @@ export default function SettingsTab({
         <div className="settings-row">
           <div className="settings-row-icon" style={{ background: "rgba(128,128,128,0.15)" }}>🌓</div>
           <div className="settings-row-body">
-            <div className="settings-row-label">Theme</div>
-            <select className="settings-select" value={form.theme} onChange={(event) => updateField("theme", event.target.value)}>
+            <label className="settings-row-label" htmlFor="settings-theme">Theme</label>
+            <select id="settings-theme" className="settings-select" value={form.theme} onChange={(event) => updateField("theme", event.target.value)}>
               <option value="dark">Dark</option>
               <option value="light">Light</option>
             </select>
@@ -152,8 +157,8 @@ export default function SettingsTab({
         <div className="settings-row">
           <div className="settings-row-icon" style={{ background: "rgba(48,209,88,0.15)" }}>📄</div>
           <div className="settings-row-body">
-            <div className="settings-row-label">Default export format</div>
-            <select className="settings-select" value={form.exportFormat} onChange={(event) => updateField("exportFormat", event.target.value)}>
+            <label className="settings-row-label" htmlFor="settings-export-format">Default export format</label>
+            <select id="settings-export-format" className="settings-select" value={form.exportFormat} onChange={(event) => updateField("exportFormat", event.target.value)}>
               <option value="txt">Plain Text (.txt)</option>
               <option value="csv">CSV (.csv)</option>
               <option value="json">JSON (.json)</option>
@@ -170,8 +175,8 @@ export default function SettingsTab({
         <div className="settings-row">
           <div className="settings-row-icon" style={{ background: "rgba(10,132,255,0.15)" }}>👤</div>
           <div className="settings-row-body">
-            <div className="settings-row-label">Display Name</div>
-            <input className="settings-input" value={form.displayName || currentUser.displayName} onChange={(event) => updateField("displayName", event.target.value)} />
+            <label className="settings-row-label" htmlFor="settings-display-name">Display Name</label>
+            <input id="settings-display-name" className="settings-input" value={form.displayName || currentUser.displayName} onChange={(event) => updateField("displayName", event.target.value)} />
             <div className="settings-row-desc" style={{ marginTop: 6 }}>Role: {currentUser.role === "admin" ? "Admin" : "Tester"}</div>
           </div>
         </div>
@@ -193,12 +198,18 @@ export default function SettingsTab({
               Sends a one-time link so the new user can set their own password. Link expires in 72 hours.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-              <input className="settings-input" type="email" autoComplete="off" placeholder="email@hailtrace.com" value={newInvite.email} onChange={(event) => setNewInvite((current) => ({ ...current, email: event.target.value }))} />
-              <input className="settings-input" placeholder="Display Name" value={newInvite.displayName} onChange={(event) => setNewInvite((current) => ({ ...current, displayName: event.target.value }))} />
+              <div>
+                <label className="sr-only" htmlFor="invite-user-email">Invite user email</label>
+                <input id="invite-user-email" className="settings-input" type="email" autoComplete="off" placeholder="email@hailtrace.com" value={newInvite.email} onChange={(event) => setNewInvite((current) => ({ ...current, email: event.target.value }))} />
+              </div>
+              <div>
+                <label className="sr-only" htmlFor="invite-user-display-name">Invite user display name</label>
+                <input id="invite-user-display-name" className="settings-input" placeholder="Display Name" value={newInvite.displayName} onChange={(event) => setNewInvite((current) => ({ ...current, displayName: event.target.value }))} />
+              </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button className="settings-save-btn" style={{ marginTop: 0 }} onClick={handleInviteUser}>Send Invite</button>
-              <span style={{ fontSize: 12, color: inviteMessage.startsWith("✓") ? "var(--pass)" : "var(--fail)" }}>{inviteMessage}</span>
+              <span role="status" aria-live="polite" style={{ fontSize: 12, color: inviteMessage.startsWith("✓") ? "var(--pass)" : "var(--fail)" }}>{inviteMessage}</span>
             </div>
           </div>
           <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
@@ -207,16 +218,28 @@ export default function SettingsTab({
               Use this only when you cannot email the user. Avoid hand-rolled passwords when an invite is possible.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-              <input className="settings-input" type="email" autoComplete="off" placeholder="email@hailtrace.com" value={newUser.email} onChange={(event) => setNewUser((current) => ({ ...current, email: event.target.value }))} />
-              <input className="settings-input" placeholder="Display Name" value={newUser.displayName} onChange={(event) => setNewUser((current) => ({ ...current, displayName: event.target.value }))} />
+              <div>
+                <label className="sr-only" htmlFor="admin-user-email">New user email</label>
+                <input id="admin-user-email" className="settings-input" type="email" autoComplete="off" placeholder="email@hailtrace.com" value={newUser.email} onChange={(event) => setNewUser((current) => ({ ...current, email: event.target.value }))} />
+              </div>
+              <div>
+                <label className="sr-only" htmlFor="admin-user-display-name">New user display name</label>
+                <input id="admin-user-display-name" className="settings-input" placeholder="Display Name" value={newUser.displayName} onChange={(event) => setNewUser((current) => ({ ...current, displayName: event.target.value }))} />
+              </div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-              <input className="settings-input" type="password" placeholder="Password (12+ chars)" value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} />
-              <input className="settings-input" type="password" placeholder="Confirm Password" value={newUser.confirm} onChange={(event) => setNewUser((current) => ({ ...current, confirm: event.target.value }))} />
+              <div>
+                <label className="sr-only" htmlFor="admin-user-password">New user password</label>
+                <input id="admin-user-password" className="settings-input" type="password" placeholder="Password (12+ chars)" value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} />
+              </div>
+              <div>
+                <label className="sr-only" htmlFor="admin-user-confirm-password">Confirm new user password</label>
+                <input id="admin-user-confirm-password" className="settings-input" type="password" placeholder="Confirm Password" value={newUser.confirm} onChange={(event) => setNewUser((current) => ({ ...current, confirm: event.target.value }))} />
+              </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button className="settings-save-btn" style={{ marginTop: 0 }} onClick={handleAddUser}>Add User</button>
-              <span style={{ fontSize: 12, color: adminMessage.startsWith("✓") ? "var(--pass)" : "var(--fail)" }}>{adminMessage}</span>
+              <span role="status" aria-live="polite" style={{ fontSize: 12, color: adminMessage.startsWith("✓") ? "var(--pass)" : "var(--fail)" }}>{adminMessage}</span>
             </div>
           </div>
           <div>
@@ -250,7 +273,7 @@ export default function SettingsTab({
 
       <div className="stagger" style={{ animationDelay: "200ms", display: "flex", alignItems: "center", paddingBottom: 32 }}>
         <button className="settings-save-btn" onClick={handleSave}>Save Settings</button>
-        <span className={`settings-saved-msg ${saved ? "show" : ""}`}>✓ Saved</span>
+        <span className={`settings-saved-msg ${saved ? "show" : ""}`} role="status" aria-live="polite">✓ Saved</span>
       </div>
     </div>
   );

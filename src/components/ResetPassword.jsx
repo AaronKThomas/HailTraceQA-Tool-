@@ -59,11 +59,11 @@ export default function ResetPassword() {
       </div>
       <div className="login-card">
         {tokenState.status === "loading" && (
-          <div className="login-fields">Checking your reset link…</div>
+          <div className="login-fields" role="status" aria-live="polite">Checking your reset link…</div>
         )}
         {tokenState.status === "invalid" && (
           <div className="login-fields">
-            <div className="login-error">This reset link is invalid or has expired.</div>
+            <div className="login-error" role="alert">This reset link is invalid or has expired.</div>
             <div className="login-footer">
               <a href="/forgot-password">Request a new link</a>
               {" · "}
@@ -75,12 +75,13 @@ export default function ResetPassword() {
           <>
             <div className="login-fields">
               <div className="field-group">
-                <label>Email</label>
-                <input type="email" value={tokenState.email} disabled readOnly />
+                <label htmlFor="reset-email">Email</label>
+                <input id="reset-email" type="email" value={tokenState.email} disabled readOnly />
               </div>
               <div className="field-group">
-                <label>New password</label>
+                <label htmlFor="reset-new-password">New password</label>
                 <input
+                  id="reset-new-password"
                   type="password"
                   autoComplete="new-password"
                   value={form.password}
@@ -90,8 +91,9 @@ export default function ResetPassword() {
                 />
               </div>
               <div className="field-group">
-                <label>Confirm new password</label>
+                <label htmlFor="reset-confirm-password">Confirm new password</label>
                 <input
+                  id="reset-confirm-password"
                   type="password"
                   autoComplete="new-password"
                   value={form.confirm}
@@ -100,7 +102,7 @@ export default function ResetPassword() {
                 />
               </div>
             </div>
-            {error ? <div className="login-error">{error}</div> : null}
+            {error ? <div className="login-error" role="alert">{error}</div> : null}
             <button className="login-btn" disabled={!isValid || submitting} onClick={handleSubmit}>
               {submitting ? "Updating…" : "Update password"}
             </button>
@@ -108,7 +110,7 @@ export default function ResetPassword() {
         )}
         {done && (
           <>
-            <div className="login-fields">
+            <div className="login-fields" role="status" aria-live="polite">
               <p style={{ margin: 0, color: "var(--text)", fontSize: 14, lineHeight: 1.5 }}>
                 Your password has been updated. All existing sessions for this
                 account have been signed out. Please sign in with your new

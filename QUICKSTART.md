@@ -1,6 +1,6 @@
 # Quickstart
 
-Fastest safe path for another developer to run the app, understand the auth bootstrap flow, and avoid the common local setup traps.
+Fastest safe path for you to run the app, understand the auth bootstrap flow, and avoid the common local setup traps.
 
 ## Prerequisites
 
