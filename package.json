@@ -9,6 +9,7 @@
     "start:dev": "node server.js",
     "start:prod": "node scripts/start-prod.mjs",
     "test": "node --test",
+    "smoke": "node scripts/smoke.mjs",
     "check:prod": "node scripts/check-production-readiness.mjs",
     "checklist": "node scripts/internal-publish-checklist.mjs",
     "build": "vite build",

@@ -122,6 +122,34 @@ If you want to inspect runtime mode quickly:
 curl http://localhost:3001/health
 ```
 
+### Smoke test against a running backend
+
+`npm run smoke` exercises the backend's safe endpoints end-to-end without
+mutating account state:
+
+```bash
+npm run smoke
+```
+
+What it checks: `/health`, `/health/integrations`, `/session` (anonymous),
+`/forgot-password` (constant-200 contract), and that bad credentials are
+rejected with 401.
+
+Optional flags:
+
+- `SMOKE_BASE_URL=...` — point at a different backend (default
+  `http://localhost:3001`).
+- `SMOKE_ADMIN_EMAIL=... SMOKE_ADMIN_PASSWORD=...` — also exercise
+  `login -> /session -> logout` against an existing admin. Skipped silently
+  if either is missing. Nothing is persisted.
+- `SMOKE_REQUIRE_INTEGRATIONS=true` — promote unreachable third-party
+  integrations (OpenAI, Jira, HailTrace) from informational to a hard
+  failure. Useful for pre-deploy checks; noisy in dev where networks may be
+  restricted.
+
+Exit codes: `0` all required probes passed, `1` a required probe failed,
+`2` the backend was not reachable at all.
+
 ## 9. Production-style local run
 
 Use this only when validating production config behavior.
