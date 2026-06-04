@@ -85,7 +85,7 @@ You can develop most of the UI without real credentials.
 Demo mode:
 
 - `ALLOW_DEMO_MODE=true`
-- no real OpenAI/HailTrace/Jira requirement
+- no real OpenAI/Jira requirement
 - invite/reset email links fall back to backend-side demo behavior when Customer.io is not configured
 
 Live mode in local dev:
@@ -96,8 +96,10 @@ Live mode in local dev:
 Most useful variables:
 
 - `OPENAI_API_KEY`
-- `HAILTRACE_API_BASE_URL`
-- `HAILTRACE_API_KEY`
+- `TARGET_SITE_DEFAULT_URL`
+- `TARGET_SITE_LOGIN_URL`
+- `TARGET_SITE_TEST_EMAIL`
+- `TARGET_SITE_TEST_PASSWORD`
 - `JIRA_BASE_URL`
 - `JIRA_EMAIL`
 - `JIRA_API_TOKEN`
@@ -107,6 +109,13 @@ Most useful variables:
 - `CUSTOMERIO_INVITE_TEMPLATE_ID`
 - `CUSTOMERIO_RESET_TEMPLATE_ID`
 - `APP_PUBLIC_URL`
+
+Use the target-site variables only with a dedicated low-privilege test account.
+`TARGET_SITE_DEFAULT_URL` defaults to `https://app.hailtrace.com/maps`, so
+short prompts like "search for a weather event" can run against HailTrace
+without pasting the URL each time.
+They let Playwright log into authenticated pages before running constrained
+actions such as clicking a map and checking that a popup appears.
 
 ## 8. Useful checks
 
@@ -143,7 +152,7 @@ Optional flags:
   `login -> /session -> logout` against an existing admin. Skipped silently
   if either is missing. Nothing is persisted.
 - `SMOKE_REQUIRE_INTEGRATIONS=true` — promote unreachable third-party
-  integrations (OpenAI, Jira, HailTrace) from informational to a hard
+  integrations (OpenAI, Jira) from informational to a hard
   failure. Useful for pre-deploy checks; noisy in dev where networks may be
   restricted.
 

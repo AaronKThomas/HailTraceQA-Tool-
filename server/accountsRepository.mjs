@@ -1,11 +1,28 @@
 // File-backed account repository.
 //
-// Hides the on-disk JSON layout behind a small interface (read, write,
-// readNormalized, assertSchema). Routes never touch fs directly. This is the
-// seam to swap in a real database later without changing route code.
+// Routes ask for account lifecycle operations; this module owns the JSON layout,
+// normalization, and mutation rules. That keeps auth and invite/reset handlers
+// from repeating read-map-write mechanics or token/session invariants.
 
 import fs from "node:fs/promises";
 import path from "node:path";
+
+import { verifyToken } from "./tokens.mjs";
+
+class AccountRepositoryError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+function accountError(statusCode, message) {
+  return new AccountRepositoryError(statusCode, message);
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
 
 export function createAccountRepository({ dataDir }) {
   const accountsFile = path.join(dataDir, "accounts.json");
@@ -35,6 +52,155 @@ export function createAccountRepository({ dataDir }) {
     return (await read()).map(normalize);
   }
 
+  async function getByEmail(email) {
+    return findByEmail(await readNormalized(), email);
+  }
+
+  async function listSanitized() {
+    return (await readNormalized()).map(sanitize);
+  }
+
+  async function createRegisteredAccount({ email, displayName, passwordData, actor }) {
+    const list = await readNormalized();
+    const isBootstrap = list.length === 0;
+
+    if (!isBootstrap) {
+      if (!actor?.email) {
+        throw accountError(401, "An authenticated admin must create new users.");
+      }
+      if (actor.role !== "admin") {
+        throw accountError(403, "Only admins can create users.");
+      }
+    }
+
+    if (findByEmail(list, email)) {
+      throw accountError(409, "Email already registered.");
+    }
+
+    const account = {
+      email,
+      displayName,
+      role: isBootstrap ? "admin" : "tester",
+      status: "active",
+      sessionVersion: 0,
+      pendingToken: null,
+      ...passwordData,
+      registeredAt: nowIso(),
+    };
+
+    await write([...list, account]);
+    return { account, isBootstrap };
+  }
+
+  async function issueInvite({ email, displayName, tokenRecord, send }) {
+    const list = await readNormalized();
+    const existing = findByEmail(list, email);
+    if (existing && existing.status === "active") {
+      throw accountError(409, "An active account already exists for this email.");
+    }
+
+    const nextAccount = existing
+      ? {
+        ...existing,
+        displayName,
+        pendingToken: tokenRecord,
+      }
+      : {
+        email,
+        displayName,
+        role: "tester",
+        status: "pending",
+        sessionVersion: 0,
+        pendingToken: tokenRecord,
+        passwordHash: "",
+        passwordSalt: "",
+        registeredAt: nowIso(),
+      };
+
+    // Preserve fail-closed invite semantics: a pending account is written only
+    // after the mail provider accepts the message containing the raw token.
+    await send(nextAccount);
+
+    const nextList = existing
+      ? list.map((account) => account.email === existing.email ? nextAccount : account)
+      : [...list, nextAccount];
+    await write(nextList);
+
+    return nextAccount;
+  }
+
+  async function findByRawToken(rawToken, expectedPurpose) {
+    const list = await readNormalized();
+    return list.find((account) => verifyToken(rawToken, account.pendingToken, expectedPurpose)) || null;
+  }
+
+  async function consumeInvite({ rawToken, passwordData, displayName }) {
+    const list = await readNormalized();
+    const match = list.find((account) => verifyToken(rawToken, account.pendingToken, "invite"));
+    if (!match) {
+      throw accountError(400, "This invite link is invalid or has expired.");
+    }
+
+    const updated = {
+      ...match,
+      ...passwordData,
+      status: "active",
+      pendingToken: null,
+      displayName: displayName || match.displayName,
+      sessionVersion: (Number.isInteger(match.sessionVersion) ? match.sessionVersion : 0) + 1,
+    };
+
+    await write(list.map((account) => account.email === match.email ? updated : account));
+    return updated;
+  }
+
+  async function issuePasswordReset({ email, tokenRecord }) {
+    const list = await readNormalized();
+    const match = findByEmail(list, email);
+    if (!match || match.status !== "active") return null;
+
+    const updated = { ...match, pendingToken: tokenRecord };
+    await write(list.map((account) => account.email === match.email ? updated : account));
+    return updated;
+  }
+
+  async function rotatePasswordWithResetToken({ rawToken, passwordData }) {
+    const list = await readNormalized();
+    const match = list.find((account) => verifyToken(rawToken, account.pendingToken, "reset"));
+    if (!match) {
+      throw accountError(400, "This reset link is invalid or has expired.");
+    }
+
+    const updated = {
+      ...match,
+      ...passwordData,
+      pendingToken: null,
+      // Bumping sessionVersion invalidates every existing cookie for this account
+      // on the next request, including any stolen session.
+      sessionVersion: (Number.isInteger(match.sessionVersion) ? match.sessionVersion : 0) + 1,
+    };
+
+    await write(list.map((account) => account.email === match.email ? updated : account));
+    return updated;
+  }
+
+  async function deleteAccount(email) {
+    const list = await readNormalized();
+    const target = findByEmail(list, email);
+    if (!target) {
+      throw accountError(404, "Account not found.");
+    }
+
+    if (target.role === "admin") {
+      const adminCount = list.filter((account) => account.role === "admin").length;
+      if (adminCount <= 1) {
+        throw accountError(400, "Cannot remove the last admin account.");
+      }
+    }
+
+    await write(list.filter((account) => account.email !== target.email));
+  }
+
   // Refuse to start if the on-disk schema is missing the `email` field.
   // Older snapshots used `username`; the migration script documents the path.
   async function assertSchema() {
@@ -51,7 +217,22 @@ export function createAccountRepository({ dataDir }) {
     }
   }
 
-  return { read, write, readNormalized, assertSchema, ensureDir };
+  return {
+    read,
+    write,
+    readNormalized,
+    assertSchema,
+    ensureDir,
+    getByEmail,
+    listSanitized,
+    createRegisteredAccount,
+    issueInvite,
+    findByRawToken,
+    consumeInvite,
+    issuePasswordReset,
+    rotatePasswordWithResetToken,
+    deleteAccount,
+  };
 }
 
 export function normalize(account) {

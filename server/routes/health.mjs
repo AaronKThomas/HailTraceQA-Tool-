@@ -3,15 +3,14 @@
 
 import {
   hasOpenAiConfig,
-  hasRealHailTraceConfig,
   hasRealJiraConfig,
   hasRealSlackConfig,
   hasRealZohoCliqConfig,
   hasSessionSecret,
+  hasTargetSiteAuthConfig,
   getRuntimeMode,
 } from "../config.mjs";
 import {
-  probeHailTrace,
   probeJira,
   probeOpenAi,
   probeSlack,
@@ -26,7 +25,7 @@ export function registerHealthRoutes(app, { config }) {
       service: "hailtrace-qa-local-backend",
       mode: getRuntimeMode(config),
       integrations: {
-        hailtrace: hasRealHailTraceConfig(config) ? "live" : "demo",
+        websiteQa: "local",
         jira: hasRealJiraConfig(config) ? "live" : "demo",
         slack: hasRealSlackConfig(config) ? "live" : "demo",
         openai: hasOpenAiConfig(config) ? "live" : "demo",
@@ -34,9 +33,8 @@ export function registerHealthRoutes(app, { config }) {
       },
       details: {
         openaiModel: hasOpenAiConfig(config) ? config.openaiModel : null,
-        hailtraceHost: safeHostname(config.hailtraceApiBaseUrl),
-        hailtraceQaPath: config.hailtraceQaPath,
         jiraHost: safeHostname(config.jiraBaseUrl),
+        targetSiteAuthConfigured: hasTargetSiteAuthConfig(config),
         slackConfigured: hasRealSlackConfig(config),
         zohoCliqConfigured: hasRealZohoCliqConfig(config),
         demoModeAllowed: config.allowDemoMode,
@@ -46,15 +44,19 @@ export function registerHealthRoutes(app, { config }) {
   });
 
   app.get("/health/integrations", async (_req, res) => {
-    const [openai, hailtrace, jira] = await Promise.all([
+    const [openai, jira] = await Promise.all([
       probeOpenAi(config),
-      probeHailTrace(config),
       probeJira(config),
     ]);
     res.json({
       integrations: {
         openai,
-        hailtrace,
+        websiteQa: {
+          state: "local",
+          message: hasTargetSiteAuthConfig(config)
+            ? "Local Playwright runner with target-site auth configured"
+            : "Local Playwright runner; target-site auth not configured",
+        },
         jira,
         slack: probeSlack(config),
         zohoCliq: probeZohoCliq(config),

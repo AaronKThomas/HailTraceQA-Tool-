@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { STATUS } from "../lib/constants";
-import { genId } from "../lib/utils";
+import { createQueuedTest, genId } from "../lib/utils";
 
 export function useSuites({
   currentUser,
@@ -59,10 +59,13 @@ export function useSuites({
     if (!test) return;
     setActiveTab("tests");
     setRunning(true);
-    const newTest = { id: genId(), description: test.description, source: "manual", jiraKey: null, jiraSummary: "", status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] };
+    const newTest = createQueuedTest({ description: test.description, source: "manual" });
     setTests((current) => [...current, newTest]);
-    await runSingleTest(newTest.id, test.description, null);
-    setRunning(false);
+    try {
+      await runSingleTest(newTest.id, test.description, null);
+    } finally {
+      setRunning(false);
+    }
   }, [runSingleTest, running, setActiveTab, setRunning, setTests, showToast, suites]);
 
   const runSuite = useCallback(async (suiteId) => {
@@ -80,17 +83,26 @@ export function useSuites({
     let pass = 0;
     let fail = 0;
     let manual = 0;
+    let cancelled = false;
 
     // Run suite tests serially to match the current backend contract and keep
     // the UI timeline deterministic during reviews.
-    for (const test of suite.tests) {
-      const newTest = { id: genId(), description: test.description, source: "manual", jiraKey: null, jiraSummary: "", status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] };
-      setTests((current) => [...current, newTest]);
-      // eslint-disable-next-line no-await-in-loop
-      const result = await runSingleTest(newTest.id, test.description, null);
-      if (result === STATUS.pass) pass += 1;
-      else if (result === STATUS.manual) manual += 1;
-      else fail += 1;
+    try {
+      for (const test of suite.tests) {
+        const newTest = createQueuedTest({ description: test.description, source: "manual" });
+        setTests((current) => [...current, newTest]);
+        // eslint-disable-next-line no-await-in-loop
+        const result = await runSingleTest(newTest.id, test.description, null);
+        if (result === STATUS.cancelled) {
+          cancelled = true;
+          break;
+        }
+        if (result === STATUS.pass) pass += 1;
+        else if (result === STATUS.manual) manual += 1;
+        else fail += 1;
+      }
+    } finally {
+      setRunning(false);
     }
 
     setSuites((current) => current.map((entry) => entry.id === suiteId ? {
@@ -100,8 +112,10 @@ export function useSuites({
       lastFail: fail,
       lastManual: manual,
     } : entry));
-    setRunning(false);
-    showToast(`Suite "${suite.name}" — ✓${pass} ✗${fail}${manual ? ` ⚠${manual}` : ""}`, fail > 0 ? "fail" : "pass");
+    showToast(
+      cancelled ? `Suite "${suite.name}" cancelled` : `Suite "${suite.name}" — ✓${pass} ✗${fail}${manual ? ` ⚠${manual}` : ""}`,
+      cancelled ? "" : fail > 0 ? "fail" : "pass",
+    );
   }, [runSingleTest, running, setActiveTab, setRunning, setSuites, setTests, showToast, suites]);
 
   const importDescriptionToSuite = useCallback((suiteId, description) => {

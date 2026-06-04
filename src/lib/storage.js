@@ -14,8 +14,8 @@ export function writeJson(key, value) {
   } catch {}
 }
 
-export function removeJson(key) {
-  try {
-    window.localStorage.removeItem(key);
-  } catch {}
+// Per-user namespace for locally persisted workspace state (history, settings,
+// templates, suites). Shared so every reader/writer agrees on the key format.
+export function getUserKey(prefix, email) {
+  return `${prefix}:${String(email || "").toLowerCase()}`;
 }

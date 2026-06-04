@@ -72,18 +72,31 @@ if (allowDemoMode === "true") {
 }
 
 const openAiConfigured = Boolean(String(process.env.OPENAI_API_KEY || "").trim());
-const hailtraceConfigured = Boolean(String(process.env.HAILTRACE_API_BASE_URL || "").trim() && String(process.env.HAILTRACE_API_KEY || "").trim());
 const jiraConfigured = Boolean(
   String(process.env.JIRA_BASE_URL || "").trim()
   && String(process.env.JIRA_EMAIL || "").trim()
   && String(process.env.JIRA_API_TOKEN || "").trim(),
 );
+const targetAuthValues = [
+  String(process.env.TARGET_SITE_LOGIN_URL || "").trim(),
+  String(process.env.TARGET_SITE_TEST_EMAIL || "").trim(),
+  String(process.env.TARGET_SITE_TEST_PASSWORD || "").trim(),
+];
+const targetAuthConfigured = targetAuthValues.every(Boolean);
+const targetAuthPartiallyConfigured = targetAuthValues.some(Boolean) && !targetAuthConfigured;
 
 const appPublicUrl = String(process.env.APP_PUBLIC_URL || "").trim();
 if (!appPublicUrl || !/^https:\/\//.test(appPublicUrl)) {
   fail("APP_PUBLIC_URL is required in production and must be an https:// URL. It is used to build invite and reset links.");
 } else {
   pass("APP_PUBLIC_URL is set.");
+}
+
+const targetSiteDefaultUrl = String(process.env.TARGET_SITE_DEFAULT_URL || "https://app.hailtrace.com/maps").trim();
+if (!/^https:\/\/app\.hailtrace\.com(\/|$)/i.test(targetSiteDefaultUrl)) {
+  fail("TARGET_SITE_DEFAULT_URL must be an https://app.hailtrace.com URL.");
+} else {
+  pass("HailTrace default target URL is set.");
 }
 
 const cioApiKey = String(process.env.CUSTOMERIO_APP_API_KEY || "").trim();
@@ -98,8 +111,11 @@ if (!cioApiKey || cioApiKey.startsWith("replace_") || !cioInvite || cioInvite.st
 if (openAiConfigured) pass("OpenAI integration is configured.");
 else warn("OpenAI integration is not configured.");
 
-if (hailtraceConfigured) pass("HailTrace integration is configured.");
-else warn("HailTrace integration is not configured.");
+pass("Website QA uses the local Playwright runner.");
+warn("Confirm Playwright browsers are installed in the deployment image.");
+if (targetAuthConfigured) pass("Target-site Playwright auth is configured.");
+else if (targetAuthPartiallyConfigured) fail("Target-site Playwright auth is partially configured. Set TARGET_SITE_LOGIN_URL, TARGET_SITE_TEST_EMAIL, and TARGET_SITE_TEST_PASSWORD together, or leave all three blank.");
+else warn("Target-site Playwright auth is not configured; authenticated page actions will fail closed.");
 
 if (jiraConfigured) pass("Jira integration is configured.");
 else warn("Jira integration is not configured.");

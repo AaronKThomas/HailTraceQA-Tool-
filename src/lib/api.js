@@ -1,9 +1,43 @@
+async function readJson(response) {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+async function apiRequest(backendUrl, path, {
+  method = "GET",
+  body,
+  headers = {},
+  errorMessage = "Request failed.",
+  signal,
+} = {}) {
+  const response = await fetch(`${backendUrl}${path}`, {
+    method,
+    headers: body === undefined
+      ? headers
+      : { "Content-Type": "application/json", ...headers },
+    credentials: "include",
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
+  });
+  const data = await readJson(response);
+  if (!response.ok) {
+    const fallback = typeof errorMessage === "function"
+      ? errorMessage(response, data)
+      : errorMessage;
+    throw new Error(data?.error || fallback);
+  }
+  return data;
+}
+
 export async function pingServer(backendUrl) {
   try {
-    const response = await fetch(`${backendUrl}/health`, {
-      credentials: "include",
-    });
-    return response.ok ? "ok" : "error";
+    await apiRequest(backendUrl, "/health");
+    return "ok";
   } catch {
     return "error";
   }
@@ -11,11 +45,7 @@ export async function pingServer(backendUrl) {
 
 export async function fetchHealth(backendUrl) {
   try {
-    const response = await fetch(`${backendUrl}/health`, {
-      credentials: "include",
-    });
-    if (!response.ok) return null;
-    return await response.json();
+    return await apiRequest(backendUrl, "/health");
   } catch {
     return null;
   }
@@ -23,58 +53,40 @@ export async function fetchHealth(backendUrl) {
 
 export async function fetchIntegrationsHealth(backendUrl) {
   try {
-    const response = await fetch(`${backendUrl}/health/integrations`, {
-      credentials: "include",
-    });
-    if (!response.ok) return null;
-    return await response.json();
+    return await apiRequest(backendUrl, "/health/integrations");
   } catch {
     return null;
   }
 }
 
 export async function loginRequest(backendUrl, email, password) {
-  const response = await fetch(`${backendUrl}/login`, {
+  const data = await apiRequest(backendUrl, "/login", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ email, password }),
+    body: { email, password },
+    errorMessage: "Incorrect email or password.",
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Incorrect email or password.");
   return data.account;
 }
 
 export async function registerRequest(backendUrl, payload) {
-  const response = await fetch(`${backendUrl}/register`, {
+  const data = await apiRequest(backendUrl, "/register", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(payload),
+    body: payload,
+    errorMessage: "Registration failed.",
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Registration failed.");
   return data.account;
 }
 
 export async function logoutRequest(backendUrl) {
-  const response = await fetch(`${backendUrl}/logout`, {
+  await apiRequest(backendUrl, "/logout", {
     method: "POST",
-    credentials: "include",
+    errorMessage: "Logout failed.",
   });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || "Logout failed.");
-  }
 }
 
 export async function fetchSession(backendUrl) {
   try {
-    const response = await fetch(`${backendUrl}/session`, {
-      credentials: "include",
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
+    const data = await apiRequest(backendUrl, "/session");
     return data.authenticated ? data.account : null;
   } catch {
     return null;
@@ -83,65 +95,42 @@ export async function fetchSession(backendUrl) {
 
 export async function fetchAllAccounts(backendUrl) {
   try {
-    const response = await fetch(`${backendUrl}/accounts`, {
-      credentials: "include",
-    });
-    return response.ok ? response.json() : [];
+    return await apiRequest(backendUrl, "/accounts");
   } catch {
     return [];
   }
 }
 
-export async function fetchRegisteredAccount(backendUrl, email) {
-  const accounts = await fetchAllAccounts(backendUrl);
-  const needle = String(email || "").toLowerCase();
-  return accounts.find((account) => account.email?.toLowerCase() === needle) || null;
-}
-
 export async function removeAccount(backendUrl, email) {
-  const response = await fetch(`${backendUrl}/accounts/${encodeURIComponent(email)}`, {
+  await apiRequest(backendUrl, `/accounts/${encodeURIComponent(email)}`, {
     method: "DELETE",
-    credentials: "include",
+    errorMessage: "Failed.",
   });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || "Failed.");
-  }
 }
 
 export async function inviteUserRequest(backendUrl, { email, displayName }) {
-  const response = await fetch(`${backendUrl}/invite`, {
+  const data = await apiRequest(backendUrl, "/invite", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ email, displayName }),
+    body: { email, displayName },
+    errorMessage: "Could not send invite.",
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "Could not send invite.");
   return data.account;
 }
 
 export async function validateInviteToken(backendUrl, token) {
   try {
-    const response = await fetch(`${backendUrl}/invite/${encodeURIComponent(token)}`, {
-      credentials: "include",
-    });
-    if (!response.ok) return { valid: false };
-    return await response.json();
+    return await apiRequest(backendUrl, `/invite/${encodeURIComponent(token)}`);
   } catch {
     return { valid: false };
   }
 }
 
 export async function acceptInviteRequest(backendUrl, { token, password, displayName }) {
-  const response = await fetch(`${backendUrl}/accept-invite`, {
+  const data = await apiRequest(backendUrl, "/accept-invite", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ token, password, displayName }),
+    body: { token, password, displayName },
+    errorMessage: "Could not accept invite.",
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "Could not accept invite.");
   return data.account;
 }
 
@@ -158,50 +147,36 @@ export async function forgotPasswordRequest(backendUrl, email) {
 
 export async function validateResetToken(backendUrl, token) {
   try {
-    const response = await fetch(`${backendUrl}/reset/${encodeURIComponent(token)}`, {
-      credentials: "include",
-    });
-    if (!response.ok) return { valid: false };
-    return await response.json();
+    return await apiRequest(backendUrl, `/reset/${encodeURIComponent(token)}`);
   } catch {
     return { valid: false };
   }
 }
 
 export async function resetPasswordRequest(backendUrl, { token, password }) {
-  const response = await fetch(`${backendUrl}/reset-password`, {
+  await apiRequest(backendUrl, "/reset-password", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ token, password }),
+    body: { token, password },
+    errorMessage: "Could not reset password.",
   });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || "Could not reset password.");
-  }
 }
 
-export async function runTestRequest(backendUrl, description, jiraKey) {
-  const response = await fetch(`${backendUrl}/run-test`, {
+export async function runTestRequest(backendUrl, description, jiraKey, { signal } = {}) {
+  return await apiRequest(backendUrl, "/run-test", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ description, jiraKey: jiraKey || null }),
+    body: { description, jiraKey: jiraKey || null },
+    errorMessage: "Server error",
+    signal,
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Server error");
-  return data;
 }
 
 export async function fetchJiraTicket(config, key) {
   // The frontend never talks to Jira directly. Keeping this request behind the
   // backend preserves one trust boundary for future credentials and logging.
-  const response = await fetch(`${config.backendUrl}/jira/issue/${encodeURIComponent(key)}`, {
+  return await apiRequest(config.backendUrl, `/jira/issue/${encodeURIComponent(key)}`, {
     headers: { Accept: "application/json" },
-    credentials: "include",
+    errorMessage: (response) => `Jira error ${response.status}`,
   });
-  if (!response.ok) throw new Error(`Jira error ${response.status}`);
-  return response.json();
 }
 
 export async function checkEndpoint(backendUrl, path, method = "GET") {
@@ -229,53 +204,33 @@ export async function checkEndpoint(backendUrl, path, method = "GET") {
 }
 
 export async function sendSlackNotificationRequest(backendUrl, payload) {
-  const response = await fetch(`${backendUrl}/notifications/slack`, {
+  await apiRequest(backendUrl, "/notifications/slack", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(payload),
+    body: payload,
+    errorMessage: "Failed to send Slack notification.",
   });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || "Failed to send Slack notification.");
-  }
 }
 
 export async function testSlackWebhookRequest(backendUrl, payload) {
-  const response = await fetch(`${backendUrl}/notifications/slack/test`, {
+  await apiRequest(backendUrl, "/notifications/slack/test", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(payload),
+    body: payload,
+    errorMessage: "Failed to send test Slack notification.",
   });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || "Failed to send test Slack notification.");
-  }
 }
 
 export async function sendZohoCliqNotificationRequest(backendUrl, payload) {
-  const response = await fetch(`${backendUrl}/notifications/zoho-cliq`, {
+  await apiRequest(backendUrl, "/notifications/zoho-cliq", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(payload),
+    body: payload,
+    errorMessage: "Failed to send Zoho Cliq notification.",
   });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || "Failed to send Zoho Cliq notification.");
-  }
 }
 
 export async function testZohoCliqWebhookRequest(backendUrl, payload) {
-  const response = await fetch(`${backendUrl}/notifications/zoho-cliq/test`, {
+  await apiRequest(backendUrl, "/notifications/zoho-cliq/test", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(payload),
+    body: payload,
+    errorMessage: "Failed to send test Zoho Cliq notification.",
   });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || "Failed to send test Zoho Cliq notification.");
-  }
 }

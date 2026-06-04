@@ -18,18 +18,32 @@ function signValue(secret, value) {
   return createHmac("sha256", secret).update(value).digest("base64url");
 }
 
-export function getClientIp(req) {
-  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
-  return forwarded || req.socket?.remoteAddress || "unknown";
+// X-Forwarded-For is attacker-controllable, so only trust it when the app is
+// explicitly configured to sit behind a proxy (TRUST_PROXY). When trusted, we
+// take the last hop — the value appended by the nearest trusted proxy — and
+// assume a single reverse proxy in front. Otherwise we use the raw socket
+// address so a client cannot rotate the header to evade per-IP rate limits.
+export function getClientIp(req, { trustProxy = false } = {}) {
+  if (trustProxy) {
+    const hops = String(req.headers["x-forwarded-for"] || "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (hops.length) return hops[hops.length - 1];
+  }
+  return req.socket?.remoteAddress || "unknown";
 }
 
 export function buildCorsOptions(allowedOrigins) {
   const allowed = new Set(allowedOrigins.filter(Boolean));
   return {
     origin(origin, callback) {
-      if (!origin || allowed.size === 0 || allowed.has(origin)) {
-        return callback(null, true);
-      }
+      // No Origin header means a non-browser client (curl, server-to-server),
+      // which CORS does not protect against; allow it. Browser origins must be
+      // on the allowlist. Fail closed: an empty allowlist denies all origins
+      // rather than silently allowing every site with credentials.
+      if (!origin) return callback(null, true);
+      if (allowed.has(origin)) return callback(null, true);
       return callback(new Error("Origin not allowed by CORS policy"));
     },
     credentials: true,
@@ -185,8 +199,9 @@ export function createRateLimiter({ windowMs, limit, keyPrefix }) {
       };
     }
 
+    // `current` is the same object reference stored in the map, so mutating its
+    // count updates the entry in place — no re-set needed.
     current.count += 1;
-    entries.set(compositeKey, current);
     return { ok: true, remaining: limit - current.count };
   };
 }

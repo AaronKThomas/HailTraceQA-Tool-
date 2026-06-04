@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { acceptInviteRequest, validateInviteToken } from "../lib/api";
 import { defaultSettings } from "../lib/constants";
+import { readSearchParam } from "../lib/utils";
 
 export default function AcceptInvite() {
   const backendUrl = defaultSettings.backendUrl;
@@ -11,10 +12,7 @@ export default function AcceptInvite() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
 
-  const token = useMemo(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("token") || "";
-  }, []);
+  const token = useMemo(() => readSearchParam("token"), []);
 
   useEffect(() => {
     let active = true;

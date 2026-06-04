@@ -1,6 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { STATUS, STATUS_CONFIG } from "../../lib/constants";
 import { parseJiraUrl, parseOutput } from "../../lib/utils";
+
+const ESTIMATED_TEST_DURATION_MS = 90 * 1000;
+
+function formatDuration(ms) {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+}
 
 function RecommendationsList({ items }) {
   return (
@@ -11,6 +21,61 @@ function RecommendationsList({ items }) {
           <div className="recommendation-description">{item.description}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function getProgressView({ test, queuePosition, now }) {
+  const status = test.status;
+  const isDone = status === STATUS.pass || status === STATUS.fail || status === STATUS.manual || status === STATUS.cancelled;
+  const isRunning = status === STATUS.running;
+  if (isRunning) {
+    const elapsedMs = Math.max(0, now - (test.startedAt || now));
+    const percent = Math.min(95, Math.max(8, Math.round((elapsedMs / ESTIMATED_TEST_DURATION_MS) * 100)));
+    const remainingMs = ESTIMATED_TEST_DURATION_MS - elapsedMs;
+    return {
+      label: "Running browser QA",
+      percent,
+      detail: remainingMs > 0 ? `${percent}% · ~${formatDuration(remainingMs)} left` : `${percent}% · finishing up`,
+    };
+  }
+  if (status === STATUS.idle) {
+    const estimatedWaitMs = Math.max(1, queuePosition) * ESTIMATED_TEST_DURATION_MS;
+    return {
+      label: queuePosition > 1 ? `Queued #${queuePosition}` : "Queued next",
+      percent: 0,
+      detail: `0% · starts in ~${formatDuration(estimatedWaitMs)}`,
+    };
+  }
+  if (isDone) {
+    const durationMs = test.startedAt && test.completedAt ? test.completedAt - test.startedAt : 0;
+    return {
+      label: status === STATUS.cancelled ? "Cancelled" : "Complete",
+      percent: 100,
+      detail: durationMs > 0 ? `100% · ${formatDuration(durationMs)}` : "100%",
+    };
+  }
+  return { label: "Queued", percent: 0, detail: "0%" };
+}
+
+function TestProgress({ test, queuePosition, now }) {
+  const { label, percent, detail } = getProgressView({ test, queuePosition, now });
+  const status = test.status;
+  const isDone = status === STATUS.pass || status === STATUS.fail || status === STATUS.manual || status === STATUS.cancelled;
+  const isRunning = status === STATUS.running;
+
+  return (
+    <div
+      className={`task-progress status-${status} ${isRunning ? "running" : ""} ${isDone ? "done" : ""}`}
+      aria-label={`${label}, ${detail}`}
+    >
+      <div className="task-progress-meta">
+        <span>{label}</span>
+        <span>{detail}</span>
+      </div>
+      <div className="task-progress-track" aria-hidden="true">
+        <div className="task-progress-fill" style={{ width: `${percent}%` }} />
+      </div>
     </div>
   );
 }
@@ -60,6 +125,24 @@ function TestDetail({ test }) {
         </div>
       ) : null}
 
+      {test.replay?.url ? (
+        <div style={{ marginTop: 20, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+          <div className="output-section-label">Execution Replay</div>
+          <video
+            controls
+            controlsList="nodownload"
+            preload="metadata"
+            src={test.replay.url}
+            style={{ width: "100%", maxHeight: 420, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)" }}
+          >
+            <a href={test.replay.url} target="_blank" rel="noreferrer">Open video replay</a>
+          </video>
+          <div className="api-desc" style={{ marginTop: 8 }}>
+            Replay expires {test.replay.expiresAt ? new Date(test.replay.expiresAt).toLocaleString() : "soon"}.
+          </div>
+        </div>
+      ) : null}
+
       {test.playwrightLog ? (
         <div style={{ marginTop: 20, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
           <div className="output-section-label">Execution Log</div>
@@ -77,11 +160,13 @@ export default function TestsTab({
   onInitiateTest,
   onRemoveTest,
   onRerunTest,
+  onCancelTest,
   onSaveAsTemplate,
   draftInput,
   setDraftInput,
 }) {
   const [openDetailId, setOpenDetailId] = useState(null);
+  const [progressNow, setProgressNow] = useState(Date.now());
 
   const jiraDetected = useMemo(() => parseJiraUrl(draftInput.trim()), [draftInput]);
   const testsStatusMessage = running
@@ -96,6 +181,19 @@ export default function TestsTab({
     setDraftInput("");
     await onInitiateTest(raw);
   }
+
+  const submitLabel = fetchingJira
+    ? "Loading Jira…"
+    : running ? "Add to Queue" : "Run Test";
+
+  useEffect(() => {
+    if (!running) {
+      setProgressNow(Date.now());
+      return undefined;
+    }
+    const timer = window.setInterval(() => setProgressNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
 
   return (
     <>
@@ -112,7 +210,7 @@ export default function TestsTab({
         <textarea
           id="test-input"
           value={draftInput}
-          disabled={running}
+          disabled={fetchingJira}
           aria-describedby="test-input-help test-run-status"
           placeholder={"Describe a feature to test, or paste a Jira URL / key (one per line)\n\nExamples:\n  • User should be able to submit a hail damage report\n  • HT-108\n  • https://yourcompany.atlassian.net/browse/HT-108"}
           onChange={(event) => setDraftInput(event.target.value)}
@@ -124,12 +222,17 @@ export default function TestsTab({
           }}
         />
         <div className="input-footer">
-          <div className={`progress-bar-wrap ${running ? "show" : ""}`}><div className="progress-bar-fill" /></div>
+          <div className={`progress-bar-wrap ${running || fetchingJira ? "show" : ""}`}><div className="progress-bar-fill" /></div>
           <div className="input-actions">
-            <span id="test-input-help" className="input-hint">Press Ctrl+Enter or Cmd+Enter to run.</span>
-            <span id="test-run-status" className="sr-only">{running ? "Test execution in progress." : "Test execution idle."}</span>
-            <button className={`run-btn ${running ? "running" : ""}`} disabled={!draftInput.trim() || running || fetchingJira} onClick={handleRun}>
-              {running ? <><span className="spinner" /> Analyzing…</> : "Run Test"}
+            <span id="test-input-help" className="input-hint">Press Ctrl+Enter or Cmd+Enter to {running ? "add to the queue" : "run"}.</span>
+            <span id="test-run-status" className="sr-only">{running ? "Test queue is processing." : "Test execution idle."}</span>
+            {running ? (
+              <button className="cancel-btn" type="button" onClick={onCancelTest}>
+                Cancel Queue
+              </button>
+            ) : null}
+            <button className={`run-btn ${running ? "running" : ""}`} disabled={!draftInput.trim() || fetchingJira} onClick={handleRun}>
+              {running ? <><span className="spinner" /> {submitLabel}</> : submitLabel}
             </button>
           </div>
         </div>
@@ -147,9 +250,12 @@ export default function TestsTab({
             <div className="tests-list" aria-label="Queued and completed tests">
               {tests.map((test, index) => {
                 const config = STATUS_CONFIG[test.status];
-                const hasOutput = (test.output || test.playwrightLog || test.apiResults?.length) && test.status !== STATUS.idle;
+                const hasOutput = (test.output || test.playwrightLog || test.apiResults?.length || test.replay?.url) && test.status !== STATUS.idle;
                 const isRunning = test.status === STATUS.running;
                 const isCompleted = test.status !== STATUS.idle && test.status !== STATUS.running;
+                const queuePosition = test.status === STATUS.idle
+                  ? tests.slice(0, index).filter((entry) => entry.status === STATUS.idle).length + 1
+                  : 0;
                 const detailId = `test-detail-${test.id}`;
                 const headingId = `test-title-${test.id}`;
 
@@ -162,6 +268,7 @@ export default function TestsTab({
                           {test.jiraKey ? <div className="test-jira">{test.jiraKey} · {test.jiraSummary || ""}</div> : null}
                           <h2 id={headingId} className="test-desc">{test.description.length > 160 ? `${test.description.slice(0, 160)}…` : test.description}</h2>
                           {isRunning ? <div className="test-running-label">Running test…</div> : null}
+                          <TestProgress test={test} queuePosition={queuePosition} now={progressNow} />
                           <div className="test-badges">
                             <span className="source-badge" style={{ color: test.source === "jira" ? "var(--accent)" : "var(--muted)", background: test.source === "jira" ? "rgba(10,132,255,0.12)" : "rgba(128,128,128,0.08)", borderColor: test.source === "jira" ? "rgba(10,132,255,0.25)" : "var(--border)" }}>
                               {test.source === "jira" ? "Jira" : "Manual"}
@@ -171,6 +278,7 @@ export default function TestsTab({
                               {config.label}
                             </span>
                             {hasOutput ? <button className="view-btn" aria-expanded={openDetailId === test.id} aria-controls={detailId} onClick={() => setOpenDetailId((current) => current === test.id ? null : test.id)}>{openDetailId === test.id ? "Hide" : "View"}</button> : null}
+                            {isRunning ? <button className="cancel-btn" aria-label={`Cancel test ${index + 1}`} onClick={onCancelTest}>Cancel</button> : null}
                             {isCompleted ? <button className="rerun-btn" aria-label={`Re-run test ${index + 1}`} onClick={() => onRerunTest(test.id)}>↺ Re-run</button> : null}
                             {test.status === STATUS.idle ? <button className="remove-btn" aria-label={`Remove test ${index + 1}`} onClick={() => onRemoveTest(test.id)}>×</button> : null}
                             {test.status === STATUS.idle ? <button className="view-btn" onClick={() => onSaveAsTemplate(test.id)}>Save as template</button> : null}

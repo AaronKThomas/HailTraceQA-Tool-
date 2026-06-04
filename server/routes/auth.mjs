@@ -12,9 +12,9 @@ import {
   validatePassword,
   verifyPassword,
 } from "../security.mjs";
-import { applyRateLimit, isSecureRequest, requireAuth } from "../middleware.mjs";
+import { applyRateLimit, applyRateLimitForKey, isSecureRequest, requireAuth } from "../middleware.mjs";
 import { ensureSessionSecret } from "../config.mjs";
-import { findByEmail, sanitize } from "../accountsRepository.mjs";
+import { sanitize } from "../accountsRepository.mjs";
 
 export function registerAuthRoutes(app, { config, accounts, rateLimits }) {
   app.post("/login", async (req, res) => {
@@ -26,9 +26,9 @@ export function registerAuthRoutes(app, { config, accounts, rateLimits }) {
       }
 
       const emailValue = validateEmail(email);
+      if (!applyRateLimitForKey(res, rateLimits.loginByEmail, emailValue, "login")) return undefined;
       const passwordValue = String(password);
-      const list = await accounts.readNormalized();
-      const match = findByEmail(list, emailValue);
+      const match = await accounts.getByEmail(emailValue);
 
       // Generic 401 covers "no account", "wrong password", "pending", and
       // "corrupt record" with the same body to prevent enumeration.
@@ -60,43 +60,20 @@ export function registerAuthRoutes(app, { config, accounts, rateLimits }) {
       const emailValue = validateEmail(email);
       const displayNameValue = validateDisplayName(displayName);
       const passwordValue = validatePassword(password);
-      const list = await accounts.readNormalized();
-      const isBootstrap = list.length === 0;
-
-      if (!isBootstrap) {
-        if (!req.user?.email) {
-          return res.status(401).json({ error: "An authenticated admin must create new users." });
-        }
-        if (req.user.role !== "admin") {
-          return res.status(403).json({ error: "Only admins can create users." });
-        }
-      }
-
-      if (findByEmail(list, emailValue)) {
-        return res.status(409).json({ error: "Email already registered." });
-      }
-
       const passwordData = await hashPassword(passwordValue);
-      const account = {
+      const { account, isBootstrap } = await accounts.createRegisteredAccount({
         email: emailValue,
         displayName: displayNameValue,
-        role: isBootstrap ? "admin" : "tester",
-        status: "active",
-        sessionVersion: 0,
-        pendingToken: null,
-        ...passwordData,
-        registeredAt: new Date().toISOString(),
-      };
-
-      list.push(account);
-      await accounts.write(list);
+        passwordData,
+        actor: req.user,
+      });
       if (isBootstrap) {
         ensureSessionSecret(config);
         setSessionCookie(res, config.sessionSecret, account, isSecureRequest(req));
       }
       return res.status(201).json({ account: sanitize(account) });
     } catch (error) {
-      return res.status(400).json({ error: error.message || "Registration failed." });
+      return res.status(error.statusCode || 400).json({ error: error.message || "Registration failed." });
     }
   });
 

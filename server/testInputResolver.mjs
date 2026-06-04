@@ -21,8 +21,6 @@ export async function resolveTestInput(config, description, jiraKey) {
     } catch (error) {
       console.warn(`[jira] Could not load ${ticketKey}: ${error.message}`);
     }
-  } else if (!ticketKey) {
-    ticketKey = parseJiraKey(text);
   }
 
   return { text, ticketKey: ticketKey || null };

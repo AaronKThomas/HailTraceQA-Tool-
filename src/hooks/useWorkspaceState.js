@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
 import { pingServer } from "../lib/api";
-import { writeJson } from "../lib/storage";
-
-function getUserKey(prefix, email) {
-  return `${prefix}:${String(email || "").toLowerCase()}`;
-}
+import { getUserKey, writeJson } from "../lib/storage";
 
 export function useWorkspaceState({
   settings,

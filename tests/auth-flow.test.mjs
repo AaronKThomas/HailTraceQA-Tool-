@@ -19,6 +19,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { createApp } from "../server/app.mjs";
 import { hashPassword } from "../server/security.mjs";
 
 const ADMIN_EMAIL = "admin@hailtrace.test";
@@ -45,16 +46,6 @@ async function startTestServer() {
   tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "hailtrace-auth-test-"));
   sockets = new Set();
 
-  // These env vars MUST be set before the dynamic import below, because
-  // server.js reads them at module load.
-  process.env.HAILTRACE_TEST_MODE = "1";
-  process.env.HAILTRACE_DATA_DIR = tempDir;
-  process.env.NODE_ENV = "test";
-  process.env.SESSION_SECRET = "test-session-secret-must-be-32-bytes-long-please";
-  process.env.CORS_ALLOWED_ORIGINS = "http://localhost:5173";
-  process.env.APP_PUBLIC_URL = "http://localhost:5173";
-  process.env.ALLOW_DEMO_MODE = "true";
-
   const admin = await hashPassword(ADMIN_PASSWORD);
   await seedAccountsJson([
     {
@@ -70,10 +61,21 @@ async function startTestServer() {
     },
   ]);
 
-  // Bust ESM module cache if a prior test run loaded server.js with different
-  // env vars (matters in watch mode). The simple form: importing once per
-  // test process is fine for `node --test`.
-  ({ app } = await import("../server.js"));
+  ({ app } = createApp({
+    dataDir: tempDir,
+    isProduction: false,
+    sessionSecret: "test-session-secret-must-be-32-bytes-long-please",
+    corsAllowedOrigins: ["http://localhost:5173"],
+    trustProxy: false,
+    allowDemoMode: true,
+    allowClientActionPlans: false,
+    appPublicUrl: "http://localhost:5173",
+    customerioAppApiKey: "",
+    customerioRegion: "us",
+    customerioFromName: "",
+    customerioInviteTemplateId: "",
+    customerioResetTemplateId: "",
+  }));
 
   await new Promise((resolve, reject) => {
     server = app.listen(0, "127.0.0.1", resolve);

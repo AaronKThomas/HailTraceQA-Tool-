@@ -7,24 +7,45 @@ import {
   parseCookies,
   readSessionCookie,
 } from "./security.mjs";
-import { findByEmail } from "./accountsRepository.mjs";
 import { hasSessionSecret } from "./config.mjs";
 
 export function isSecureRequest(req) {
   return req.secure || req.headers["x-forwarded-proto"] === "https";
 }
 
+// Resolve the client IP once per request, honoring X-Forwarded-For only when
+// the deployment is configured to trust a proxy. Downstream rate limiting reads
+// req.clientIp so the trust decision lives in exactly one place.
+export function createClientIpMiddleware({ config }) {
+  return function attachClientIp(req, _res, next) {
+    req.clientIp = getClientIp(req, { trustProxy: config.trustProxy });
+    next();
+  };
+}
+
+function rejectRateLimited(res, result, scope) {
+  res.setHeader("Retry-After", String(Math.ceil((result.retryAfterMs || 1000) / 1000)));
+  res.status(429).json({ error: `Too many ${scope} requests. Please try again later.` });
+  return false;
+}
+
 // Apply a rate limiter and respond with 429 on overflow. Keying on user+ip
 // when authenticated prevents a single account from being squeezed out by
 // shared NAT traffic while still bounding per-IP abuse from anonymous users.
 export function applyRateLimit(req, res, limiter, scope) {
-  const ip = getClientIp(req);
+  const ip = req.clientIp || getClientIp(req);
   const key = req.user ? `${req.user.email}:${ip}` : ip;
   const result = limiter(key);
   if (result.ok) return true;
-  res.setHeader("Retry-After", String(Math.ceil((result.retryAfterMs || 1000) / 1000)));
-  res.status(429).json({ error: `Too many ${scope} requests. Please try again later.` });
-  return false;
+  return rejectRateLimited(res, result, scope);
+}
+
+// Rate limit on an explicit key (e.g. the submitted login email) so a single
+// account cannot be brute-forced from many rotating IPs.
+export function applyRateLimitForKey(res, limiter, key, scope) {
+  const result = limiter(key);
+  if (result.ok) return true;
+  return rejectRateLimited(res, result, scope);
 }
 
 // Re-resolves the account on every request so role/status/sessionVersion
@@ -44,8 +65,7 @@ export function createSessionMiddleware({ config, accounts }) {
     }
 
     try {
-      const list = await accounts.readNormalized();
-      const account = findByEmail(list, req.session.email);
+      const account = await accounts.getByEmail(req.session.email);
       if (!account) { next(); return; }
       if (account.status !== "active") { next(); return; }
       if (account.sessionVersion !== req.session.sessionVersion) { next(); return; }

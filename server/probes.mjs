@@ -6,11 +6,12 @@
 
 import {
   hasOpenAiConfig,
-  hasRealHailTraceConfig,
   hasRealJiraConfig,
   hasRealSlackConfig,
   hasRealZohoCliqConfig,
+  usesLocalLlmEndpoint,
 } from "./config.mjs";
+import { fetchWithTimeout } from "./http.mjs";
 
 export function safeHostname(value) {
   if (!value) return "";
@@ -21,26 +22,20 @@ export function safeHostname(value) {
   }
 }
 
-export async function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 export async function probeOpenAi(config) {
+  const local = usesLocalLlmEndpoint(config);
+  const providerLabel = local ? safeHostname(config.openaiBaseUrl) || "local LLM" : "OpenAI";
   if (!hasOpenAiConfig(config)) {
-    return { state: "demo", message: "Not configured — set OPENAI_API_KEY in .env" };
+    return { state: "demo", message: "Not configured — set OPENAI_API_KEY or OPENAI_BASE_URL in .env" };
   }
   try {
-    const response = await fetchWithTimeout("https://api.openai.com/v1/models?limit=1", {
-      headers: { Authorization: `Bearer ${config.openaiApiKey}` },
-    });
+    const headers = {};
+    if (config.openaiApiKey) {
+      headers.Authorization = `Bearer ${config.openaiApiKey}`;
+    }
+    const response = await fetchWithTimeout(`${config.openaiBaseUrl}/models?limit=1`, { headers });
     if (response.ok) {
-      return { state: "connected", message: `Ready (${config.openaiModel})` };
+      return { state: "connected", message: `Ready (${config.openaiModel} via ${providerLabel})` };
     }
     if (response.status === 401) {
       return { state: "error", message: "Invalid API key" };
@@ -48,31 +43,17 @@ export async function probeOpenAi(config) {
     if (response.status === 429) {
       return { state: "error", message: "Rate limited or quota exhausted" };
     }
-    return { state: "error", message: `OpenAI returned HTTP ${response.status}` };
+    return { state: "error", message: `${providerLabel} returned HTTP ${response.status}` };
   } catch (error) {
     if (error.name === "AbortError") {
       return { state: "error", message: "Connection timed out" };
     }
-    return { state: "error", message: "Cannot reach OpenAI" };
-  }
-}
-
-export async function probeHailTrace(config) {
-  if (!hasRealHailTraceConfig(config)) {
-    return { state: "demo", message: "Not configured — set HAILTRACE_API_KEY in .env" };
-  }
-  try {
-    const url = new URL(config.hailtraceApiBaseUrl);
-    await fetchWithTimeout(url.origin, { method: "GET" });
     return {
-      state: "connected",
-      message: `Reachable at ${url.hostname}${config.hailtraceQaPath || ""}`,
+      state: "error",
+      message: local
+        ? `Cannot reach ${providerLabel} — is the local model server running?`
+        : "Cannot reach OpenAI",
     };
-  } catch (error) {
-    if (error.name === "AbortError") {
-      return { state: "error", message: "Connection timed out" };
-    }
-    return { state: "error", message: "Cannot reach HailTrace API" };
   }
 }
 

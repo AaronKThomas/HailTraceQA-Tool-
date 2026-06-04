@@ -22,6 +22,8 @@
 // doc specified; if your templates use different names, adjust the
 // `buildMessageData` callers below.
 
+import { fetchWithTimeout } from "./http.mjs";
+
 const SEND_TIMEOUT_MS = 8000;
 
 function endpointForRegion(region) {
@@ -37,16 +39,6 @@ function redactErrorMessage(message, apiKey) {
   return cleaned.split(apiKey).join("[redacted]");
 }
 
-async function sendWithTimeout(url, options) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function hasRealConfig(config) {
   return Boolean(config?.customerioAppApiKey);
 }
@@ -57,9 +49,10 @@ function logDemoSend(label, { to, templateId, link }) {
   // already rejects), we redact the token to prevent log exfiltration from
   // creating a working credential.
   const isProduction = process.env.NODE_ENV === "production";
-  const displayLink = link
-    ? (isProduction ? `${link.split("?")[0]}?token=[redacted]` : link)
-    : "";
+  let displayLink = "";
+  if (link) {
+    displayLink = isProduction ? `${link.split("?")[0]}?token=[redacted]` : link;
+  }
   console.log(`[email:demo] ${label} -> ${to} via template ${templateId || "(none)"} ${displayLink}`);
 }
 
@@ -93,7 +86,7 @@ async function sendTransactionalEmail(config, { templateId, to, messageData, deb
   const url = endpointForRegion(config.customerioRegion);
   let response;
   try {
-    response = await sendWithTimeout(url, {
+    response = await fetchWithTimeout(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -106,7 +99,7 @@ async function sendTransactionalEmail(config, { templateId, to, messageData, deb
         message_data: messageData || {},
         from: config.customerioFromName ? config.customerioFromName : undefined,
       }),
-    });
+    }, SEND_TIMEOUT_MS);
   } catch (error) {
     if (error.name === "AbortError") {
       throw new Error("Customer.io request timed out.");
@@ -151,8 +144,4 @@ export async function sendResetEmail(config, { to, displayName, resetUrl, expire
       expires_in_hours: expiresInHours,
     },
   });
-}
-
-export function hasCustomerioConfig(config) {
-  return hasRealConfig(config);
 }

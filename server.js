@@ -19,7 +19,6 @@ import {
   buildConfig,
   getRuntimeMode,
   hasOpenAiConfig,
-  hasRealHailTraceConfig,
   hasRealJiraConfig,
   hasRealSlackConfig,
   hasRealZohoCliqConfig,
@@ -49,7 +48,7 @@ if (!process.env.HAILTRACE_TEST_MODE) {
     }
     console.log(`HailTrace QA backend listening on http://localhost:${config.port}`);
     console.log(`Mode: ${getRuntimeMode(config)}`);
-    console.log(`  HailTrace QA: ${hasRealHailTraceConfig(config) ? "live" : "demo"}`);
+    console.log(`  Website QA:   local Playwright`);
     console.log(`  Jira:         ${hasRealJiraConfig(config) ? "live" : "demo"}`);
     console.log(`  Slack:        ${hasRealSlackConfig(config) ? "live" : "demo"}`);
     console.log(`  Zoho Cliq:    ${hasRealZohoCliqConfig(config) ? "live" : "demo"}`);

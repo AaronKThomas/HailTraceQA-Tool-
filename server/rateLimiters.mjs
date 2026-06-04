@@ -10,6 +10,10 @@ import { createRateLimiter } from "./security.mjs";
 export function createRateLimiters() {
   return {
     auth: createRateLimiter({ windowMs: 15 * 60 * 1000, limit: 10, keyPrefix: "auth" }),
+    // Per-account login throttle so brute-forcing one account is bounded even
+    // when the attacker rotates source IPs (which defeats the per-IP "auth"
+    // limiter above).
+    loginByEmail: createRateLimiter({ windowMs: 15 * 60 * 1000, limit: 10, keyPrefix: "login-email" }),
     register: createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 20, keyPrefix: "register" }),
     runTest: createRateLimiter({ windowMs: 5 * 60 * 1000, limit: 30, keyPrefix: "run-test" }),
     notification: createRateLimiter({ windowMs: 5 * 60 * 1000, limit: 20, keyPrefix: "notify" }),

@@ -1,7 +1,53 @@
-import { SECTION_HEADERS } from "./constants";
+import { SECTION_HEADERS, STATUS } from "./constants";
 
 export function genId() {
   return Math.random().toString(36).slice(2, 9);
+}
+
+// Single source of truth for a queued test's shape. Centralizing it means a new
+// per-test field only has to be added here, not at the half-dozen enqueue sites.
+export function createQueuedTest({
+  description,
+  source,
+  jiraKey = null,
+  jiraSummary = "",
+  status = STATUS.idle,
+  output = "",
+}) {
+  const createdAt = Date.now();
+  return {
+    id: genId(),
+    description,
+    source,
+    jiraKey,
+    jiraSummary,
+    status,
+    output,
+    queuedAt: createdAt,
+    startedAt: null,
+    completedAt: status === STATUS.idle ? null : createdAt,
+    recommendations: [],
+    playwrightLog: "",
+    apiResults: [],
+  };
+}
+
+export function verdictToStatus(verdict) {
+  if (verdict === "PASS") return STATUS.pass;
+  if (verdict === "NEEDS MANUAL CHECK") return STATUS.manual;
+  return STATUS.fail;
+}
+
+export function statusToastPrefix(status) {
+  if (status === STATUS.pass) return "✓ Pass";
+  if (status === STATUS.fail) return "✗ Fail";
+  if (status === STATUS.cancelled) return "Cancelled";
+  return "⚠ Manual";
+}
+
+export function readSearchParam(name) {
+  const params = new URLSearchParams(window.location.search);
+  return params.get(name) || "";
 }
 
 export function parseJiraUrl(str) {

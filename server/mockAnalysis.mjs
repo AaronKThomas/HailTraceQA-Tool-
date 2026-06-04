@@ -1,5 +1,5 @@
 // Demo-mode QA analysis builder. Returns the same response shape that the
-// real HailTrace/OpenAI paths produce so the frontend renders identically
+// real Playwright/OpenAI paths produce so the frontend renders identically
 // whether or not credentials are configured.
 //
 // Pure function, no side effects, no external calls.
@@ -20,13 +20,13 @@ export function buildMockAnalysis(description, jiraKey) {
         "Demo mode: failure-oriented language detected in the request.",
         "",
         "CODE ANALYSIS",
-        "No live HailTrace API call was made.",
+        "No live browser or OpenAI call was made.",
         "",
         "ERROR LOCATION",
         jiraKey ? `Potentially related to ${jiraKey}.` : "No Jira ticket attached.",
         "",
         "RECOMMENDATIONS",
-        "Add HAILTRACE_API_BASE_URL and HAILTRACE_API_KEY to .env for live QA.",
+        "Add a public website URL to run local Playwright QA.",
         "",
         "VERDICT: FAIL",
       ].join("\n"),
@@ -55,10 +55,10 @@ export function buildMockAnalysis(description, jiraKey) {
         "Demo mode: request appears to need human verification.",
         "",
         "CODE ANALYSIS",
-        "No live HailTrace API call was made.",
+        "No live browser or OpenAI call was made.",
         "",
         "RECOMMENDATIONS",
-        "Review manually or connect the HailTrace API in .env.",
+        "Review manually or paste a public website URL for local Playwright QA.",
         "",
         "VERDICT: NEEDS MANUAL CHECK",
       ].join("\n"),
@@ -85,10 +85,10 @@ export function buildMockAnalysis(description, jiraKey) {
       "Demo mode: simulated successful QA evaluation.",
       "",
       "CODE ANALYSIS",
-      "No live HailTrace API call was made.",
+      "No live browser or OpenAI call was made.",
       "",
       "RECOMMENDATIONS",
-      "Add HAILTRACE_API_BASE_URL and HAILTRACE_API_KEY to .env for live QA.",
+      "Add a public website URL to run local Playwright QA.",
       "",
       "VERDICT: PASS",
     ].join("\n"),

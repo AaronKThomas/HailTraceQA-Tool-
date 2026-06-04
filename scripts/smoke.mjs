@@ -16,7 +16,7 @@
 //   * The optional admin login probe runs only when both SMOKE_ADMIN_EMAIL
 //     and SMOKE_ADMIN_PASSWORD are set. It performs login -> /session ->
 //     logout and never persists anything.
-//   * Third-party integrations (OpenAI/Jira/HailTrace/Slack/Zoho) are
+//   * Third-party integrations (OpenAI/Jira/Slack/Zoho) are
 //     reported but do NOT fail the smoke by default, because reachability
 //     of external services is outside the backend's contract. Set
 //     SMOKE_REQUIRE_INTEGRATIONS=true to flip integration "error" states
@@ -37,9 +37,11 @@ const requireIntegrations = String(process.env.SMOKE_REQUIRE_INTEGRATIONS || "")
 
 const results = [];
 
+const STATUS_TAGS = { pass: "PASS", skip: "SKIP", fail: "FAIL" };
+
 function record(name, status, detail) {
   results.push({ name, status, detail });
-  const tag = status === "pass" ? "PASS" : status === "skip" ? "SKIP" : "FAIL";
+  const tag = STATUS_TAGS[status] || "FAIL";
   const line = `[${tag}] ${name}${detail ? ` — ${detail}` : ""}`;
   if (status === "fail") {
     console.error(line);
@@ -70,7 +72,6 @@ async function request(pathname, { method = "GET", body, cookie } = {}) {
     return {
       status: response.status,
       json,
-      text,
       setCookie: response.headers.get("set-cookie") || "",
     };
   } finally {
@@ -138,10 +139,13 @@ async function probeHealthIntegrations() {
     return false;
   }
 
+  const brokenHint = broken.length && !requireIntegrations
+    ? " (informational; set SMOKE_REQUIRE_INTEGRATIONS=true to fail)"
+    : "";
   record(
     "GET /health/integrations",
     "pass",
-    `${liveSummary}${demoSummary}${brokenSummary}${broken.length && !requireIntegrations ? " (informational; set SMOKE_REQUIRE_INTEGRATIONS=true to fail)" : ""}`,
+    `${liveSummary}${demoSummary}${brokenSummary}${brokenHint}`,
   );
   return true;
 }

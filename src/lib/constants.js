@@ -8,6 +8,7 @@ export const STATUS = {
   pass: "pass",
   fail: "fail",
   manual: "manual",
+  cancelled: "cancelled",
 };
 
 export const STATUS_CONFIG = {
@@ -16,6 +17,7 @@ export const STATUS_CONFIG = {
   pass: { label: "Pass", bg: "var(--pass-light)", border: "var(--pass-border)", text: "var(--pass)", dot: "var(--pass)" },
   fail: { label: "Fail", bg: "var(--fail-light)", border: "var(--fail-border)", text: "var(--fail)", dot: "var(--fail)" },
   manual: { label: "Manual", bg: "var(--warn-light)", border: "var(--warn-border)", text: "var(--warn)", dot: "var(--warn)" },
+  cancelled: { label: "Cancelled", bg: "rgba(128,128,128,0.08)", border: "var(--border)", text: "var(--muted)", dot: "var(--faint)" },
 };
 
 export const SECTION_HEADERS = [
@@ -25,8 +27,6 @@ export const SECTION_HEADERS = [
   "ERROR LOCATION",
   "RECOMMENDATIONS",
 ];
-
-export const ALL_TABS = ["tests", "history", "settings", "templates", "suites", "dashboard"];
 
 export const DASHBOARD_ENDPOINTS = [
   {
@@ -57,9 +57,9 @@ export const INTEGRATIONS = [
     blurb: "Reads your plain-English request and writes the test summary.",
   },
   {
-    key: "hailtrace",
-    label: "HailTrace API",
-    blurb: "Runs the actual automated tests and returns pass/fail.",
+    key: "websiteQa",
+    label: "Website QA",
+    blurb: "Runs local Playwright browser checks and returns pass/fail.",
   },
   {
     key: "jira",

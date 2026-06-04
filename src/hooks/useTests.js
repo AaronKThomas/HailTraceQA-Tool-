@@ -1,7 +1,19 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { fetchJiraTicket, runTestRequest, sendSlackNotificationRequest, sendZohoCliqNotificationRequest } from "../lib/api";
 import { STATUS } from "../lib/constants";
-import { genId, parseJiraUrl, playChime } from "../lib/utils";
+import { createQueuedTest, genId, parseJiraUrl, playChime, statusToastPrefix, verdictToStatus } from "../lib/utils";
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
+}
+
+function normalizeReplay(backendUrl, replay) {
+  if (!replay?.url) return null;
+  return {
+    ...replay,
+    url: replay.url.startsWith("http") ? replay.url : `${backendUrl}${replay.url}`,
+  };
+}
 
 export function useTests({
   backendUrl,
@@ -13,6 +25,10 @@ export function useTests({
   const [tests, setTests] = useState([]);
   const [running, setRunning] = useState(false);
   const [fetchingJira, setFetchingJira] = useState(false);
+  const activeRunRef = useRef(null);
+  const pendingQueueRef = useRef([]);
+  const queueProcessingRef = useRef(false);
+  const cancelQueuedRunsRef = useRef(false);
 
   const stats = useMemo(() => ({
     pass: tests.filter((test) => test.status === STATUS.pass).length,
@@ -43,19 +59,28 @@ export function useTests({
   }, [backendUrl, settings.zohoCliqOnFail, settings.zohoCliqOnPass]);
 
   const runSingleTest = useCallback(async (testId, description, jiraKey) => {
+    const controller = new AbortController();
+    activeRunRef.current = { controller, testId };
     // Flip status immediately so cards feel responsive while the backend is
     // still running or while reviewers are exercising the mock contract.
-    setTests((current) => current.map((test) => test.id === testId ? { ...test, status: STATUS.running } : test));
+    setTests((current) => current.map((test) => test.id === testId ? {
+      ...test,
+      status: STATUS.running,
+      startedAt: Date.now(),
+      completedAt: null,
+    } : test));
     try {
-      const data = await runTestRequest(backendUrl, description, jiraKey);
-      const status = data.verdict === "PASS" ? STATUS.pass : data.verdict === "NEEDS MANUAL CHECK" ? STATUS.manual : STATUS.fail;
+      const data = await runTestRequest(backendUrl, description, jiraKey, { signal: controller.signal });
+      const status = verdictToStatus(data.verdict);
       setTests((current) => current.map((test) => test.id === testId ? {
         ...test,
         status,
+        completedAt: Date.now(),
         output: data.analysis || "",
         recommendations: data.recommendations || [],
         playwrightLog: data.playwrightLog || "",
         apiResults: data.apiResults || [],
+        replay: normalizeReplay(backendUrl, data.replay),
       } : test));
       addHistoryEntry({
         id: genId(),
@@ -74,16 +99,32 @@ export function useTests({
       if ((status === STATUS.fail && settings.zohoCliqOnFail) || (status === STATUS.pass && settings.zohoCliqOnPass)) {
         notifyZohoCliq(description, status, data.verdict).catch(() => {});
       }
-      showToast(`${status === "pass" ? "✓ Pass" : status === "fail" ? "✗ Fail" : "⚠ Manual"} — ${description.slice(0, 50)}`, status);
+      showToast(`${statusToastPrefix(status)} — ${description.slice(0, 50)}`, status);
       return status;
     } catch (error) {
+      if (isAbortError(error)) {
+        setTests((current) => current.map((test) => test.id === testId ? {
+          ...test,
+          status: STATUS.cancelled,
+          completedAt: Date.now(),
+          output: "Test cancelled before completion.",
+          recommendations: [],
+          playwrightLog: "",
+          apiResults: [],
+          replay: null,
+        } : test));
+        showToast("Test cancelled", "");
+        return STATUS.cancelled;
+      }
       setTests((current) => current.map((test) => test.id === testId ? {
         ...test,
         status: STATUS.fail,
+        completedAt: Date.now(),
         output: `Error: ${error.message}`,
         recommendations: [],
         playwrightLog: "",
         apiResults: [],
+        replay: null,
       } : test));
       addHistoryEntry({
         id: genId(),
@@ -97,65 +138,116 @@ export function useTests({
       });
       showToast(`Error: ${error.message}`, "fail");
       return STATUS.fail;
+    } finally {
+      if (activeRunRef.current?.testId === testId) {
+        activeRunRef.current = null;
+      }
     }
   }, [addHistoryEntry, backendUrl, currentUser, notifySlack, notifyZohoCliq, settings.slackOnFail, settings.slackOnPass, settings.zohoCliqOnFail, settings.zohoCliqOnPass, settings.soundOnComplete, showToast]);
 
-  const initiateTest = useCallback(async (raw) => {
-    if (!raw || running) return;
+  const drainQueue = useCallback(async function drainQueue() {
+    if (queueProcessingRef.current) return;
+    queueProcessingRef.current = true;
     setRunning(true);
-    const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
-    const newTests = [];
 
-    // Treat multi-line input as a light batch queue so reviewers can paste a
-    // handful of prompts or Jira keys and watch them execute in order.
-    for (const line of lines) {
-      const jiraKey = parseJiraUrl(line);
-      if (jiraKey) {
-        setFetchingJira(true);
-        try {
-          const ticket = await fetchJiraTicket({ backendUrl }, jiraKey);
-          const description = [
-            ticket.summary,
-            ticket.description ? `\n\nDescription: ${ticket.description}` : "",
-            ticket.acceptanceCriteria ? `\n\nAcceptance Criteria: ${ticket.acceptanceCriteria}` : "",
-          ].join("").trim();
-          newTests.push({ id: genId(), description, source: "jira", jiraKey: ticket.key, jiraSummary: ticket.summary, status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] });
-        } catch (error) {
-          newTests.push({ id: genId(), description: `Failed to load ${jiraKey}: ${error.message}`, source: "jira", jiraKey, jiraSummary: "", status: STATUS.fail, output: error.message, recommendations: [], playwrightLog: "", apiResults: [] });
-        }
-        setFetchingJira(false);
+    try {
+      while (!cancelQueuedRunsRef.current) {
+        const next = pendingQueueRef.current.shift();
+        if (!next) break;
+        // eslint-disable-next-line no-await-in-loop
+        const result = await runSingleTest(next.id, next.description, next.jiraKey);
+        if (result === STATUS.cancelled) break;
+      }
+    } finally {
+      queueProcessingRef.current = false;
+      if (pendingQueueRef.current.length && !cancelQueuedRunsRef.current) {
+        drainQueue();
       } else {
-        newTests.push({ id: genId(), description: line, source: "manual", jiraKey: null, jiraSummary: "", status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] });
+        setRunning(false);
       }
     }
+  }, [runSingleTest]);
 
+  const enqueueTests = useCallback((newTests) => {
+    if (!newTests.length) return;
+    cancelQueuedRunsRef.current = false;
     setTests((current) => [...current, ...newTests]);
-    for (const test of newTests) {
-      if (test.status !== STATUS.idle) continue;
-      // eslint-disable-next-line no-await-in-loop
-      await runSingleTest(test.id, test.description, test.jiraKey);
+    pendingQueueRef.current.push(...newTests.filter((test) => test.status === STATUS.idle));
+    drainQueue();
+  }, [drainQueue]);
+
+  const initiateTest = useCallback(async (raw) => {
+    if (!raw) return;
+    cancelQueuedRunsRef.current = false;
+    try {
+      const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+      const newTests = [];
+
+      // Treat multi-line input as a light batch queue so reviewers can paste a
+      // handful of prompts or Jira keys and watch them execute in order.
+      for (const line of lines) {
+        if (cancelQueuedRunsRef.current) break;
+        const jiraKey = parseJiraUrl(line);
+        if (jiraKey) {
+          setFetchingJira(true);
+          try {
+            const ticket = await fetchJiraTicket({ backendUrl }, jiraKey);
+            const description = [
+              ticket.summary,
+              ticket.description ? `\n\nDescription: ${ticket.description}` : "",
+              ticket.acceptanceCriteria ? `\n\nAcceptance Criteria: ${ticket.acceptanceCriteria}` : "",
+            ].join("").trim();
+            newTests.push(createQueuedTest({ description, source: "jira", jiraKey: ticket.key, jiraSummary: ticket.summary }));
+          } catch (error) {
+            newTests.push(createQueuedTest({ description: `Failed to load ${jiraKey}: ${error.message}`, source: "jira", jiraKey, status: STATUS.fail, output: error.message }));
+          }
+          setFetchingJira(false);
+        } else {
+          newTests.push(createQueuedTest({ description: line, source: "manual" }));
+        }
+      }
+
+      enqueueTests(newTests);
+    } finally {
+      setFetchingJira(false);
     }
-    setRunning(false);
-  }, [backendUrl, runSingleTest, running]);
+  }, [backendUrl, enqueueTests]);
 
   const rerunTest = useCallback(async (id) => {
     const existing = tests.find((test) => test.id === id);
-    if (!existing || running) return;
-    const newTest = { id: genId(), description: existing.description, source: existing.source, jiraKey: existing.jiraKey || null, jiraSummary: existing.jiraSummary || "", status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] };
-    setTests((current) => [...current, newTest]);
-    await runSingleTest(newTest.id, newTest.description, newTest.jiraKey);
-  }, [runSingleTest, running, tests]);
+    if (!existing) return;
+    cancelQueuedRunsRef.current = false;
+    const newTest = createQueuedTest({ description: existing.description, source: existing.source, jiraKey: existing.jiraKey || null, jiraSummary: existing.jiraSummary || "" });
+    enqueueTests([newTest]);
+  }, [enqueueTests, tests]);
 
   const rerunFromHistory = useCallback(async (entry) => {
-    if (running) {
-      showToast("A test is already running", "fail");
-      return false;
-    }
-    const newTest = { id: genId(), description: entry.description, source: entry.jiraKey ? "jira" : "manual", jiraKey: entry.jiraKey || null, jiraSummary: "", status: STATUS.idle, output: "", recommendations: [], playwrightLog: "", apiResults: [] };
-    setTests((current) => [...current, newTest]);
-    await runSingleTest(newTest.id, newTest.description, newTest.jiraKey);
+    cancelQueuedRunsRef.current = false;
+    const newTest = createQueuedTest({ description: entry.description, source: entry.jiraKey ? "jira" : "manual", jiraKey: entry.jiraKey || null });
+    enqueueTests([newTest]);
     return true;
-  }, [runSingleTest, running, showToast]);
+  }, [enqueueTests]);
+
+  const cancelRunningTest = useCallback(() => {
+    cancelQueuedRunsRef.current = true;
+    const queuedIds = new Set(pendingQueueRef.current.map((test) => test.id));
+    pendingQueueRef.current = [];
+    if (queuedIds.size) {
+      setTests((current) => current.map((test) => queuedIds.has(test.id)
+        ? {
+          ...test,
+          status: STATUS.cancelled,
+          completedAt: Date.now(),
+          output: "Test cancelled before it started.",
+          recommendations: [],
+          playwrightLog: "",
+          apiResults: [],
+          replay: null,
+        }
+        : test));
+    }
+    activeRunRef.current?.controller.abort();
+  }, []);
 
   return {
     tests,
@@ -168,9 +260,13 @@ export function useTests({
     rerunTest,
     rerunFromHistory,
     runSingleTest,
+    cancelRunningTest,
     clearTests: () => {
       if (!running) setTests([]);
     },
-    removeTest: (id) => setTests((current) => current.filter((test) => test.id !== id)),
+    removeTest: (id) => {
+      pendingQueueRef.current = pendingQueueRef.current.filter((test) => test.id !== id);
+      setTests((current) => current.filter((test) => test.id !== id));
+    },
   };
 }

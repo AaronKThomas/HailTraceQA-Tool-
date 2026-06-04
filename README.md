@@ -7,7 +7,7 @@ This repo is a small full-stack app:
 - React + Vite frontend in `src/`
 - Express backend in [server.js](/Users/aaronthomas/Desktop/HailTraceQATool/server.js)
 - File-backed local account store in `data/accounts.json` at runtime
-- Optional integrations for OpenAI, HailTrace, Jira, Slack, Zoho Cliq, and Customer.io
+- Optional integrations for OpenAI, Jira, Slack, Zoho Cliq, and Customer.io
 
 ## What Problem It Solves
 
@@ -15,7 +15,7 @@ The app gives QA a single internal workspace for:
 
 - turning plain-English requests into a test brief
 - optionally expanding Jira tickets into structured test context
-- executing HailTrace-backed QA when credentials exist
+- executing local Playwright website QA when a public URL is provided
 - summarizing results for faster triage
 - saving history, templates, suites, and exports per user
 
@@ -29,15 +29,20 @@ At runtime, the backend chooses the best available pipeline based on environment
 2. The frontend detects Jira-like input and can fetch ticket details through the backend.
 3. `POST /run-test` resolves the input into a test brief.
 4. If OpenAI is configured, the backend uses it to interpret the request and summarize outcomes.
-5. If HailTrace is configured, the backend executes the QA run.
+5. If a public website URL is present, the backend executes a local Playwright QA run.
 6. The UI stores user-owned history, templates, suites, and settings in browser `localStorage`.
 
 Runtime behavior by config:
 
-- OpenAI + HailTrace: full interpret -> execute -> summarize path
-- OpenAI only: QA plan and analysis, no live execution
-- HailTrace only: direct execution without LLM planning
+- OpenAI + website URL: interpret -> Playwright execute -> summarize path
+- website URL only: direct Playwright execution without LLM planning
+- OpenAI only without a website URL: QA plan and analysis, no browser execution
 - No external credentials: demo/mock behavior
+
+Playwright can also execute constrained page actions such as clicking text,
+clicking simple selectors, filling labeled fields, and checking that text or a
+popup-like element appears. Authenticated target pages require a dedicated
+low-privilege test account configured only on the backend.
 
 ## Main User Flows
 
@@ -93,8 +98,9 @@ HailTraceQATool/
 │   ├── security.mjs               # Cookie auth, hashing, validation, rate limiting
 │   ├── tokens.mjs                 # Invite/reset token generation and verification
 │   ├── email.mjs                  # Customer.io-backed invite/reset delivery
-│   ├── integrations.mjs           # HailTrace, Jira, Slack, Zoho Cliq calls
+│   ├── integrations.mjs           # Jira, Slack, Zoho Cliq calls
 │   ├── openai.mjs                 # LLM-guided QA flows
+│   ├── websiteQa.mjs              # Local Playwright website QA runner
 │   ├── jiraKey.mjs                # Jira URL/key parsing helpers
 │   └── loadEnv.mjs                # Dev/prod env loading
 ├── tests/                         # Node test coverage for security and auth flows
@@ -162,8 +168,10 @@ Important variables:
 - `ALLOW_DEMO_MODE`
 - `APP_PUBLIC_URL`
 - `OPENAI_API_KEY`
-- `HAILTRACE_API_BASE_URL`
-- `HAILTRACE_API_KEY`
+- `TARGET_SITE_DEFAULT_URL`
+- `TARGET_SITE_LOGIN_URL`
+- `TARGET_SITE_TEST_EMAIL`
+- `TARGET_SITE_TEST_PASSWORD`
 - `JIRA_BASE_URL`
 - `JIRA_EMAIL`
 - `JIRA_API_TOKEN`

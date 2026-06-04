@@ -2,15 +2,7 @@ function trimSlash(value) {
   return String(value || "").replace(/\/$/, "");
 }
 
-function normalizeVerdict(value) {
-  const raw = String(value || "").toUpperCase();
-  if (raw.includes("PASS")) return "PASS";
-  if (raw.includes("MANUAL")) return "NEEDS MANUAL CHECK";
-  if (raw.includes("FAIL")) return "FAIL";
-  return "FAIL";
-}
-
-export function extractJiraText(field) {
+function extractJiraText(field) {
   if (!field) return "";
   if (typeof field === "string") return field;
 
@@ -32,98 +24,6 @@ function parseAcceptanceCriteria(description) {
   if (!description) return "";
   const match = description.match(/acceptance criteria[:\s]*([\s\S]*)/i);
   return match ? match[1].trim() : "";
-}
-
-export function normalizeQaResponse(data, description, jiraKey) {
-  const verdict = normalizeVerdict(
-    data?.verdict
-    || data?.result?.verdict
-    || data?.status
-    || data?.outcome,
-  );
-
-  const analysis = data?.analysis
-    || data?.report
-    || data?.output
-    || data?.message
-    || [
-      "WHAT IS BEING TESTED",
-      description,
-      "",
-      "API RESULTS",
-      JSON.stringify(data?.apiResults || data?.results || [], null, 2),
-      "",
-      "VERDICT: " + verdict,
-    ].join("\n");
-
-  return {
-    verdict,
-    analysis: String(analysis),
-    apiResults: Array.isArray(data?.apiResults)
-      ? data.apiResults
-      : Array.isArray(data?.results)
-        ? data.results
-        : [],
-    playwrightLog: data?.playwrightLog || data?.playwright_log || "",
-  };
-}
-
-export async function runHailTraceTest(config, description, jiraKey) {
-  const baseUrl = trimSlash(config.hailtraceApiBaseUrl);
-  const path = config.hailtraceQaPath || "/qa/run-test";
-  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
-  const headers = {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
-
-  if (config.hailtraceAuthStyle === "api-key") {
-    headers["X-API-Key"] = config.hailtraceApiKey;
-  } else {
-    headers.Authorization = `Bearer ${config.hailtraceApiKey}`;
-  }
-
-  const started = Date.now();
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      description,
-      jiraKey: jiraKey || null,
-      prompt: description,
-    }),
-  });
-
-  const latency = Date.now() - started;
-  const rawText = await response.text();
-  let payload = {};
-  try {
-    payload = rawText ? JSON.parse(rawText) : {};
-  } catch {
-    payload = { message: rawText };
-  }
-
-  const apiResult = {
-    type: "REST",
-    method: "POST",
-    endpoint: url,
-    description: "HailTrace QA evaluation",
-    result: { ok: response.ok, status: response.status },
-    error: response.ok ? undefined : payload.error || payload.message || response.statusText,
-  };
-
-  if (!response.ok) {
-    const error = new Error(payload.error || payload.message || `HailTrace API error ${response.status}`);
-    error.apiResults = [apiResult];
-    throw error;
-  }
-
-  const normalized = normalizeQaResponse(payload, description, jiraKey);
-  normalized.apiResults = [apiResult, ...normalized.apiResults];
-  if (!normalized.playwrightLog) {
-    normalized.playwrightLog = `[hailtrace] Completed in ${latency}ms`;
-  }
-  return normalized;
 }
 
 export async function fetchJiraIssue(config, key) {

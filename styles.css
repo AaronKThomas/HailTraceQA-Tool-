@@ -261,6 +261,16 @@ body.light .dropdown-menu { background:rgba(255,255,255,0.96); }
 .test-jira { font-size:11px; color:var(--accent); font-weight:600; margin-bottom:3px; }
 .test-desc { font-size:15px; color:var(--text); line-height:1.6; word-break:break-word; max-width:72ch; font-weight:500; }
 .test-running-label { margin-top:5px; font-size:12px; color:var(--accent); }
+.task-progress { margin-top:10px; max-width:360px; }
+.task-progress-meta { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:5px; font-size:11px; font-weight:600; color:var(--faint); text-transform:uppercase; letter-spacing:0.05em; }
+.task-progress-track { height:4px; border-radius:999px; overflow:hidden; background:rgba(128,128,128,0.12); border:1px solid var(--border); }
+.task-progress-fill { height:100%; width:16%; border-radius:999px; background:linear-gradient(90deg,var(--faint),rgba(128,128,128,0.28)); transition:width 0.2s ease, background 0.2s ease; }
+.task-progress.running .task-progress-meta { color:var(--accent); }
+.task-progress.running .task-progress-fill { background:linear-gradient(90deg,var(--accent),var(--accent-hover)); box-shadow:0 0 12px rgba(10,132,255,0.35); }
+.task-progress.done .task-progress-fill { width:100%; background:var(--pass); animation:none; }
+.task-progress.status-fail.done .task-progress-fill { background:var(--fail); }
+.task-progress.status-manual.done .task-progress-fill { background:var(--warn); }
+.task-progress.status-cancelled.done .task-progress-fill { background:var(--faint); }
 .test-badges { display:flex; align-items:center; gap:6px; margin-top:8px; flex-wrap:wrap; }
 .tag { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:500; padding:3px 10px; border-radius:20px; border:1px solid; }
 .tag-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
@@ -269,6 +279,8 @@ body.light .dropdown-menu { background:rgba(255,255,255,0.96); }
 .remove-btn { background:none; border:none; color:var(--faint); font-size:20px; line-height:1; padding:0 2px; min-height:28px; }
 .rerun-btn { background:rgba(10,132,255,0.1); border:1px solid rgba(10,132,255,0.25); color:var(--accent); font-size:11px; padding:3px 10px; border-radius:6px; font-weight:500; min-height:28px; transition:background 0.15s; }
 .rerun-btn:hover { background:rgba(10,132,255,0.18); }
+.cancel-btn { background:rgba(255,69,58,0.1); border:1px solid rgba(255,69,58,0.28); color:var(--fail); font-size:11px; padding:3px 10px; border-radius:6px; font-weight:600; min-height:28px; transition:background 0.15s; }
+.cancel-btn:hover { background:rgba(255,69,58,0.18); }
 .test-detail { border-top:1px solid var(--border); background:rgba(0,0,0,0.14); padding:18px 18px 18px 52px; overflow-y:auto; max-height:540px; display:none; -webkit-overflow-scrolling:touch; }
 body.light .test-detail { background:rgba(0,0,0,0.025); }
 .test-detail.open { display:block; }

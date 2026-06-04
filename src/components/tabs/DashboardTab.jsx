@@ -9,6 +9,11 @@ const STATE_CONFIG = {
     tone: "ok",
     description: "Working correctly.",
   },
+  local: {
+    label: "Local runner",
+    tone: "ok",
+    description: "Runs on this computer.",
+  },
   configured: {
     label: "Set up",
     tone: "info",
@@ -155,7 +160,7 @@ export default function DashboardTab({
     const states = integrationCards.map((card) => card.state);
     const errors = states.filter((state) => state === "error").length;
     const demos = states.filter((state) => state === "demo").length;
-    const connected = states.filter((state) => state === "connected" || state === "configured").length;
+    const connected = states.filter((state) => state === "connected" || state === "configured" || state === "local").length;
     return { errors, demos, connected, total: integrationCards.length };
   }, [integrationCards]);
 

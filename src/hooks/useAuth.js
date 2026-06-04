@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchSession, loginRequest, logoutRequest, registerRequest } from "../lib/api";
 import { defaultSettings } from "../lib/constants";
-import { readJson } from "../lib/storage";
-
-function getUserKey(prefix, email) {
-  return `${prefix}:${String(email || "").toLowerCase()}`;
-}
+import { getUserKey, readJson, writeJson } from "../lib/storage";
 
 export function useAuth() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -83,11 +79,7 @@ export function useAuth() {
   }, [hydrateUser]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem("hailtrace-qa:session:last", JSON.stringify({
-        backendUrl: settings.backendUrl,
-      }));
-    } catch {}
+    writeJson("hailtrace-qa:session:last", { backendUrl: settings.backendUrl });
   }, [settings.backendUrl]);
 
   return {
