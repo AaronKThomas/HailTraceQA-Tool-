@@ -1,4 +1,4 @@
-import DashboardTab from "./tabs/DashboardTab";
+import DashboardTab from "../features/dashboard/DashboardTab";
 import HistoryTab from "./tabs/HistoryTab";
 import SettingsTab from "./tabs/SettingsTab";
 import SuitesTab from "./tabs/SuitesTab";
